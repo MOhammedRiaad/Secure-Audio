@@ -80,7 +80,7 @@ const AudioPlayer = () => {
         setCheckpoints(checkpointsRes.data.data || []);
         setDuration(fileRes.data.data.duration);
       } catch (err) {
-        setError('Failed to load audio file');
+        setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to load audio file');
         console.error('Error:', err);
       } finally {
         setLoading(false);

@@ -69,7 +69,7 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       return {
         success: false,
-        error: err.response?.data?.error || 'Registration failed',
+        error: err.response?.data?.error?.message || err.response?.data?.message || 'Registration failed',
       };
     }
   };
@@ -115,7 +115,7 @@ export const AuthProvider = ({ children }) => {
       console.error('Login error:', err);
       return { 
         success: false, 
-        error: err.message || 'Login failed. Please check your credentials.' 
+        error: err.response?.data?.error?.message || err.response?.data?.message || 'Login failed. Please check your credentials.' 
       };
     }
   };

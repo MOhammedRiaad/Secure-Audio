@@ -174,7 +174,7 @@ const FileUpload = () => {
     } catch (err) {
       console.error('Error uploading file:', err);
       setError(
-        err.response?.data?.error || 'Failed to upload file. Please try again.'
+        err.response?.data?.error?.message || err.response?.data?.message || 'Failed to upload file. Please try again.'
       );
       setUploading(false);
       setUploadProgress(0);

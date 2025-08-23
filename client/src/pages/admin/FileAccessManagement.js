@@ -102,7 +102,7 @@ const FileAccessManagement = () => {
       setSelectedUser('');
       setExpiresAt('');
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to grant access');
+      setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to grant access');
       console.error('Error granting access:', err);
     }
   };
@@ -117,7 +117,7 @@ const FileAccessManagement = () => {
       
       setSuccess('Access updated successfully');
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to update access');
+      setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to update access');
       console.error('Error updating access:', err);
     }
   };
@@ -144,7 +144,7 @@ const FileAccessManagement = () => {
       setOpenDialog(false);
       setAccessToDelete(null);
     } catch (err) {
-      setDeleteError(err.response?.data?.error || 'Failed to revoke access');
+      setDeleteError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to revoke access');
       console.error('Error revoking access:', err);
     } finally {
       setDeleteLoading(false);

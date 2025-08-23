@@ -66,7 +66,7 @@ const FileManagement = () => {
         const res = await api.get('/admin/files');
         setAudioFiles(res.data.data || []);
       } catch (err) {
-        setError('Failed to load audio files');
+        setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to load audio files');
         console.error('Error fetching audio files:', err);
       } finally {
         setLoading(false);

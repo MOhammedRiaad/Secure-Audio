@@ -39,7 +39,7 @@ const Dashboard = () => {
         console.log('Audio files response:', res.data);
         setAudioFiles(res.data.data || []);
       } catch (err) {
-        setError('Failed to fetch audio files');
+        setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to fetch audio files');
         console.error('Error fetching audio files:', err);
         console.error('Error details:', err.response?.data || err.message);
       } finally {

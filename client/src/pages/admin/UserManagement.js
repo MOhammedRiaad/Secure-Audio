@@ -55,7 +55,7 @@ const UserManagement = () => {
         const res = await axios.get('/api/v1/admin/users');
         setUsers(res.data.data || []);
       } catch (err) {
-        setError('Failed to load users');
+        setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to load users');
         console.error('Error fetching users:', err);
       } finally {
         setLoading(false);
@@ -111,7 +111,7 @@ const UserManagement = () => {
         setSuccessMessage('');
       }, 5000);
     } catch (err) {
-      setDeleteError(err.response?.data?.error || 'Failed to delete user');
+      setDeleteError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to delete user');
       console.error('Error deleting user:', err);
     } finally {
       setDeleteLoading(false);

@@ -42,7 +42,7 @@ const AdminDashboard = () => {
           totalPlayTime: filesRes.data.totalDuration || 0,
         });
       } catch (err) {
-        setError('Failed to load dashboard statistics');
+        setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to load dashboard statistics');
         console.error('Error:', err);
       } finally {
         setLoading(false);

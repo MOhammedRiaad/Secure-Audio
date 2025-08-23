@@ -102,24 +102,20 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/files
 // @access  Private/Admin
 exports.uploadAudioFile = asyncHandler(async (req, res, next) => {
-  if (!req.files) {
+  if (!req.file) {
     return next(new ErrorResponse(`Please upload a file`, 400));
   }
 
-  const file = req.files.file;
+  const file = req.file;
 
   // Check if file is audio
   if (!file.mimetype.startsWith('audio/')) {
     return next(new ErrorResponse(`Please upload an audio file`, 400));
   }
 
-  // Create custom filename
-  const fileExt = path.extname(file.name);
-  const fileName = `${crypto.randomBytes(16).toString('hex')}${fileExt}`;
-  const uploadPath = path.join(process.env.FILE_UPLOAD_PATH, fileName);
-
-  // Move file to uploads folder
-  await file.mv(uploadPath);
+  // Multer has already saved the file, use the generated filename
+  const uploadPath = file.path;
+  const fileName = path.basename(file.path);
 
   try {
     // Get file duration using ffmpeg if available, otherwise use 0
@@ -128,12 +124,12 @@ exports.uploadAudioFile = asyncHandler(async (req, res, next) => {
     // Create file in database
     const audioFile = await prisma.audioFile.create({
       data: {
-        filename: file.name,
+        filename: file.originalname,
         path: fileName,
         mimeType: file.mimetype,
         size: file.size,
         duration,
-        title: req.body.title || path.parse(file.name).name,
+        title: req.body.title || path.parse(file.originalname).name,
         description: req.body.description || null,
         isPublic: req.body.isPublic === 'true' || false
       }
