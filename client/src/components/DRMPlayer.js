@@ -3,6 +3,8 @@ import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 
 const DRMPlayer = ({ fileId, onError }) => {
+  console.log('🎬 DRMPlayer component rendered with props:', { fileId, onError: !!onError });
+  
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -13,7 +15,7 @@ const DRMPlayer = ({ fileId, onError }) => {
   const [error, setError] = useState(null);
   
   const audioRef = useRef(null);
-  const { token } = useAuth();
+  const { token, loading } = useAuth();
   
   // Initialize DRM session and setup chunked streaming
   useEffect(() => {
@@ -23,11 +25,11 @@ const DRMPlayer = ({ fileId, onError }) => {
         setError(null);
         
         console.log('🔐 Initializing DRM session for file ID:', fileId);
+        console.log('🔑 Token value:', token ? 'Token present' : 'Token is null/undefined');
+        console.log('🔑 Token from localStorage:', localStorage.getItem('token') ? 'Present' : 'Missing');
         
         // Get DRM status
-        const statusResponse = await api.get(`/drm/status/${fileId}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const statusResponse = await api.get(`/drm/status/${fileId}`);
         console.log('📊 DRM status response:', statusResponse.data);
         setDrmStatus({
           ...statusResponse.data.data,
@@ -35,9 +37,7 @@ const DRMPlayer = ({ fileId, onError }) => {
         });
         
         // Generate secure session
-        const sessionResponse = await api.post(`/drm/session/${fileId}`, {}, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const sessionResponse = await api.post(`/drm/session/${fileId}`, {});
         console.log('✅ DRM session response:', sessionResponse.data);
         
         setSessionToken(sessionResponse.data.data.sessionToken);
@@ -48,44 +48,150 @@ const DRMPlayer = ({ fileId, onError }) => {
         // Setup chunked audio streaming for enhanced security
         if (audioRef.current) {
           setupChunkedAudioStreaming(sessionResponse.data.data.sessionToken);
+        } else {
+          console.error('❌ Audio ref is null when trying to setup streaming');
+          setError('Audio player initialization failed');
         }
         
       } catch (error) {
         console.error('❌ DRM initialization failed:', error);
         console.error('❌ Error details:', error.response?.data || error.message);
-        setError(`Failed to initialize secure playback: ${error.response?.data?.message || error.message}`);
+        console.error('❌ Error status:', error.response?.status);
+        console.error('❌ Error config:', error.config);
+        
+        let errorMessage = 'Failed to initialize secure playback';
+        if (error.response?.status === 401) {
+          errorMessage = 'Authentication required. Please log in again.';
+        } else if (error.response?.status === 403) {
+          errorMessage = 'Access denied. You do not have permission to access this file.';
+        } else if (error.response?.status === 404) {
+          errorMessage = 'Audio file not found.';
+        } else {
+          errorMessage = `Failed to initialize secure playback: ${error.response?.data?.message || error.message}`;
+        }
+        
+        setError(errorMessage);
         if (onError) onError(error);
       } finally {
         setIsLoading(false);
       }
     };
     
-    if (fileId && token) {
-      initializeDRM();
+    console.log('🔄 Effect triggered - fileId:', fileId, 'token:', token ? 'present' : 'null', 'loading:', loading);
+    console.log('🔍 FileId type:', typeof fileId, 'FileId value:', fileId);
+    console.log('🔍 DRM useEffect triggered:', { fileId, token: !!token, loading });
+    
+    if (fileId && typeof fileId === 'number' && !loading) {
+      if (token) {
+        console.log('🔐 Initializing DRM for file:', fileId);
+        initializeDRM();
+      } else {
+        console.warn('⚠️ No token available for DRM initialization');
+        setError('Authentication required for secure playback');
+      }
+    } else {
+      console.log('❌ DRM initialization skipped:', {
+        hasFileId: !!fileId,
+        hasToken: !!token,
+        isLoading: loading
+      });
     }
-  }, [fileId, token, onError]);
+  }, [fileId, token, loading]);
 
   // Setup DRM audio streaming
   const setupChunkedAudioStreaming = async (sessionToken) => {
     try {
+      console.log('🔧 Setting up chunked audio streaming with session token:', sessionToken);
+      
       // Use the DRM streaming endpoint with full backend URL
       const streamUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000/api/v1'}/drm/stream/${sessionToken}`;
+      // Fix double /api/v1 in URL
+      const correctedStreamUrl = streamUrl.replace('/api/v1/api/v1', '/api/v1');
       console.log('🎵 Setting audio source URL:', streamUrl);
-      audioRef.current.src = streamUrl;
-      audioRef.current.crossOrigin = 'use-credentials';
+      console.log('🔑 Session token for streaming:', sessionToken);
       
-      // Setup event listeners for the audio element
-      audioRef.current.addEventListener('loadedmetadata', () => {
-        setDuration(audioRef.current.duration || 0);
-      });
-      
-      audioRef.current.addEventListener('timeupdate', () => {
-        setCurrentTime(audioRef.current.currentTime || 0);
-      });
-      
-      audioRef.current.addEventListener('ended', () => {
-        setIsPlaying(false);
-      });
+      if (audioRef.current) {
+        console.log('🎵 Setting audio source to:', correctedStreamUrl);
+        
+        // Test if audio element can load anything first
+        console.log('🧪 Testing audio element capabilities...');
+        console.log('🧪 Audio element before setup:', {
+          src: audioRef.current.src,
+          readyState: audioRef.current.readyState,
+          networkState: audioRef.current.networkState,
+          preload: audioRef.current.preload
+        });
+        
+        audioRef.current.src = correctedStreamUrl;
+        audioRef.current.crossOrigin = 'anonymous'; // Changed from 'use-credentials'
+        
+        console.log('🎵 Audio element after src set:', {
+          src: audioRef.current.src,
+          readyState: audioRef.current.readyState,
+          networkState: audioRef.current.networkState
+        });
+        
+        // Force load attempt
+        audioRef.current.load();
+        console.log('🔄 Forced audio load() called');
+        
+        // Wait a bit and check again
+        setTimeout(() => {
+          console.log('🎵 Audio element after load():', {
+            src: audioRef.current.src,
+            readyState: audioRef.current.readyState,
+            networkState: audioRef.current.networkState,
+            error: audioRef.current.error
+          });
+        }, 1000);
+        
+        // Add error handling for audio loading
+        audioRef.current.addEventListener('error', (e) => {
+          console.error('❌ Audio loading error:', e);
+          console.error('❌ Audio error details:', {
+            error: audioRef.current.error,
+            networkState: audioRef.current.networkState,
+            readyState: audioRef.current.readyState,
+            src: audioRef.current.src
+          });
+          
+          // More detailed error information
+          if (audioRef.current.error) {
+            const errorCode = audioRef.current.error.code;
+            const errorMessages = {
+              1: 'MEDIA_ERR_ABORTED - The user aborted the loading process',
+              2: 'MEDIA_ERR_NETWORK - A network error occurred while loading',
+              3: 'MEDIA_ERR_DECODE - An error occurred while decoding the media',
+              4: 'MEDIA_ERR_SRC_NOT_SUPPORTED - The media format is not supported'
+            };
+            console.error('❌ Media error code:', errorCode, '-', errorMessages[errorCode] || 'Unknown error');
+          }
+          
+          setError(`Audio loading failed: ${audioRef.current.error?.message || 'Unknown error'}`);
+        });
+        
+        // Setup event listeners for the audio element
+        audioRef.current.addEventListener('loadedmetadata', () => {
+          console.log('✅ Audio metadata loaded successfully');
+          setDuration(audioRef.current.duration || 0);
+        });
+        
+        audioRef.current.addEventListener('timeupdate', () => {
+          setCurrentTime(audioRef.current.currentTime || 0);
+        });
+        
+        audioRef.current.addEventListener('ended', () => {
+          setIsPlaying(false);
+        });
+        
+        audioRef.current.addEventListener('canplay', () => {
+          console.log('✅ Audio can start playing');
+        });
+        
+        audioRef.current.addEventListener('loadstart', () => {
+          console.log('🔄 Audio loading started');
+        });
+      }
       
     } catch (error) {
       console.error('DRM streaming setup failed:', error);
@@ -247,7 +353,7 @@ const DRMPlayer = ({ fileId, onError }) => {
       {/* Hidden audio element */}
       <audio
         ref={audioRef}
-        preload="none"
+        preload="metadata"
         controlsList="nodownload nofullscreen noremoteplayback"
         disablePictureInPicture
         style={{ display: 'none' }}

@@ -160,11 +160,8 @@ const AudioPlayer = () => {
         
         {/* DRM Audio Player */}
         <DRMPlayer 
-          audioFile={audioFile}
-          drmEnabled={drmEnabled}
-          onTimeUpdate={(time) => {/* Time updates handled by DRM player */}}
-          onCheckpointJump={jumpToCheckpoint}
-          checkpoints={checkpoints}
+          fileId={parseInt(id)}
+          onError={(error) => setError(error)}
         />
       </Paper>
       

@@ -150,7 +150,7 @@ const streamChunkedAudio = async (req, res, next, filePath, session, chunkNumber
     const encryptedChunk = drm.encryptChunk(buffer, session.sessionToken, chunkNumber);
     
     // Set headers for chunked response
-    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', encryptedChunk.length);
     res.setHeader('X-Chunk-Number', chunkNumber);
     res.setHeader('X-Total-Chunks', totalChunks);
