@@ -3,6 +3,8 @@ const ErrorResponse = require('../utils/errorResponse');
 const asyncHandler = require('../middleware/async');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const SessionManager = require('../utils/sessionManager');
+const DeviceFingerprint = require('../utils/deviceFingerprint');
 
 const prisma = new PrismaClient({
   log: ['query', 'info', 'warn', 'error'],
@@ -157,6 +159,14 @@ exports.login = asyncHandler(async (req, res, next) => {
       }
     });
 
+    // Create or validate device session
+    const deviceData = req.body.deviceData || {};
+    const sessionResult = await SessionManager.createOrValidateSession(user.id, req, deviceData);
+    
+    if (!sessionResult.success) {
+      return next(ErrorResponse.internal(`Session creation failed: ${sessionResult.error}`));
+    }
+
     // Prepare user data for response
     const userData = {
       id: user.id,
@@ -166,8 +176,8 @@ exports.login = asyncHandler(async (req, res, next) => {
       isAdmin: user.isAdmin || user.role === 'admin'
     };
 
-    // Send token response
-    sendTokenResponse(userData, 200, res);
+    // Send token response with device session info
+    sendTokenResponse(userData, 200, res, sessionResult);
     
   } catch (error) {
     console.error('Login error:', error);
@@ -417,7 +427,7 @@ exports.logout = asyncHandler(async (req, res, next) => {
 });
 
 // Get token from model, create cookie and send response
-const sendTokenResponse = (user, statusCode, res) => {
+const sendTokenResponse = (user, statusCode, res, sessionResult = null) => {
   // Create token
   const token = jwt.sign(
     { 
@@ -453,10 +463,33 @@ const sendTokenResponse = (user, statusCode, res) => {
     isAdmin: user.isAdmin || user.role === 'admin'
   };
 
-  // Send response
-  res.status(statusCode).json({
+  // Prepare response data
+  const responseData = {
     success: true,
     token, // Still send token in response for clients that need it
     user: userResponse
-  });
+  };
+
+  // Add device session information if available
+  if (sessionResult) {
+    responseData.deviceSession = {
+      deviceId: sessionResult.session.deviceId,
+      deviceName: sessionResult.session.deviceName,
+      isNewDevice: sessionResult.isNewDevice,
+      expiresAt: sessionResult.session.expiresAt
+    };
+    
+    // Add warnings if devices were locked
+    if (sessionResult.lockedDevices && sessionResult.lockedDevices.length > 0) {
+      responseData.warnings = {
+        lockedDevices: sessionResult.lockedDevices.map(device => ({
+          deviceName: device.deviceName,
+          lastActivity: device.lastActivity
+        }))
+      };
+    }
+  }
+
+  // Send response
+  res.status(statusCode).json(responseData);
 };

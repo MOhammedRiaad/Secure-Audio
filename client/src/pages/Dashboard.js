@@ -18,7 +18,8 @@ import {
   Button,
   Chip,
 } from '@mui/material';
-import { Search, MusicNote } from '@mui/icons-material';
+import { Search, MusicNote, Security } from '@mui/icons-material';
+import DeviceWarnings from '../components/DeviceWarnings';
 
 const Dashboard = () => {
   const [audioFiles, setAudioFiles] = useState([]);
@@ -90,16 +91,28 @@ const Dashboard = () => {
         <Typography variant="h4" component="h1">
           My Audio Library
         </Typography>
-        {isAdmin && (
+        <Box display="flex" gap={2}>
           <Button
-            variant="contained"
-            color="primary"
-            onClick={() => navigate('/admin/files/new')}
+            variant="outlined"
+            startIcon={<Security />}
+            onClick={() => navigate('/devices')}
           >
-            Upload New File
+            Device Security
           </Button>
-        )}
+          {isAdmin && (
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => navigate('/admin/files/new')}
+            >
+              Upload New File
+            </Button>
+          )}
+        </Box>
       </Box>
+
+      {/* Device Warnings */}
+      <DeviceWarnings />
 
       <TextField
         fullWidth

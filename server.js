@@ -21,6 +21,7 @@ const authRoutes = require('./routes/auth');
 const audioFilesRoutes = require('./routes/audioFiles');
 const checkpointsRoutes = require('./routes/checkpoints');
 const drmStreamRoutes = require('./routes/drmStream');
+const deviceManagementRoutes = require('./routes/deviceManagement');
 const adminUsersRoutes = require('./routes/admin/users');
 const adminFilesRoutes = require('./routes/admin/files');
 const adminFileAccessRoutes = require('./routes/admin/fileAccess');
@@ -58,7 +59,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-ID', 'x-device-id'],
   exposedHeaders: ['set-cookie'],
   optionsSuccessStatus: 200 // Some legacy browsers choke on 204
 };
@@ -132,6 +133,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/files', auth.protect, audioFilesRoutes);
 app.use('/api/v1/checkpoints', checkpointsRoutes);
 app.use('/api/v1/drm', drmStreamRoutes);
+app.use('/api/v1/devices', deviceManagementRoutes);
 
 // Admin routes (protected and admin only)
 app.use('/api/v1/admin/users', [auth.protect, auth.authorize('admin')], adminUsersRoutes);

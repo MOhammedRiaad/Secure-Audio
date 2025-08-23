@@ -1,4 +1,5 @@
 import axios from 'axios';
+import deviceFingerprint from './utils/deviceFingerprint';
 
 // Create axios instance with base URL
 const api = axios.create({
@@ -9,17 +10,20 @@ const api = axios.create({
   withCredentials: true, // This ensures cookies are sent with requests
 });
 
-// Add a request interceptor to add the auth token to requests
+// Add a request interceptor to add the auth token and device ID to requests
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
-
     
+    // Add authorization token
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     } else {
       console.warn('No token found in localStorage');
     }
+    
+    // Add device ID header for device tracking
+    config.headers['X-Device-ID'] = deviceFingerprint.deviceId;
     
     console.log('Request headers:', config.headers);
     return config;

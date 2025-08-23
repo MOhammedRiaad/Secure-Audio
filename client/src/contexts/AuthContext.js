@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import api from '../api';
+import deviceFingerprint from '../utils/deviceFingerprint';
 
 const AuthContext = createContext();
 
@@ -12,6 +13,8 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [isAdmin, setIsAdmin] = useState(false);
+  const [deviceSession, setDeviceSession] = useState(null);
+  const [deviceWarnings, setDeviceWarnings] = useState([]);
 
   // Set auth token for API requests
   const setAuthToken = (token) => {
@@ -79,12 +82,25 @@ export const AuthProvider = ({ children }) => {
     try {
       console.log('AuthContext: Attempting login with email:', email);
       
-      // Use the API client for login to maintain consistent flow
-      console.log('AuthContext: Making API call to /auth/login');
-      const response = await api.post(
-        '/auth/login', 
-        { email, password }
-      );
+      // Include device information in login request
+      const deviceInfo = deviceFingerprint.getDeviceInfo();
+      const loginData = {
+        email,
+        password,
+        deviceData: {
+          deviceId: deviceFingerprint.getOrCreateDeviceId(),
+          deviceFingerprint: deviceFingerprint.getDeviceFingerprint(),
+          deviceName: deviceFingerprint.getDeviceName(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          language: navigator.language,
+          platform: navigator.platform,
+          cookieEnabled: navigator.cookieEnabled,
+          doNotTrack: navigator.doNotTrack
+        }
+      };
+      
+      console.log('AuthContext: Making API call to /auth/login with device info');
+      const response = await api.post('/auth/login', loginData);
       
       console.log('AuthContext: Raw response:', response);
       const { data } = response;
@@ -97,10 +113,12 @@ export const AuthProvider = ({ children }) => {
       
       console.log('AuthContext: Login response successful:', data);
       
-      // Get the token from the response body
-      const { token, user } = data;
+      // Get the token and device session from the response
+      const { token, user, deviceSession: sessionData, warnings } = data;
       console.log('AuthContext: Extracted token:', token ? 'Token received' : 'No token received');
       console.log('AuthContext: Extracted user:', user);
+      console.log('AuthContext: Device session:', sessionData);
+      console.log('AuthContext: Warnings:', warnings);
       
       if (!token) {
         throw new Error('No token received from server');
@@ -114,7 +132,21 @@ export const AuthProvider = ({ children }) => {
       setCurrentUser(user);
       setIsAdmin(checkAdminStatus(user));
       
-      return { success: true };
+      // Set device session information
+      if (sessionData) {
+        setDeviceSession(sessionData);
+      }
+      
+      // Set device warnings if any
+      if (warnings && warnings.length > 0) {
+        setDeviceWarnings(warnings);
+      }
+      
+      return { 
+        success: true, 
+        deviceSession: sessionData,
+        warnings: warnings || []
+      };
     } catch (err) {
       console.error('Login error:', err);
       return { 
@@ -125,10 +157,58 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Logout user
-  const logout = () => {
+  const logout = async () => {
+    try {
+      // Call logout endpoint to clean up server-side session
+      await api.post('/auth/logout');
+    } catch (error) {
+      console.error('Logout API call failed:', error);
+    }
+    
+    // Clear local state
     setAuthToken(null);
     setCurrentUser(null);
     setIsAdmin(false);
+    setDeviceSession(null);
+    setDeviceWarnings([]);
+  };
+
+  // Clear device warnings
+  const clearDeviceWarnings = () => {
+    setDeviceWarnings([]);
+  };
+  
+  // Get active devices
+  const getActiveDevices = async () => {
+    try {
+      const response = await api.get('/devices');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch active devices:', error);
+      throw error;
+    }
+  };
+  
+  // Deactivate device
+  const deactivateDevice = async (deviceId) => {
+    try {
+      const response = await api.delete(`/devices/${deviceId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to deactivate device:', error);
+      throw error;
+    }
+  };
+  
+  // Deactivate all other devices
+  const deactivateOtherDevices = async () => {
+    try {
+      const response = await api.delete('/devices/others');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to deactivate other devices:', error);
+      throw error;
+    }
   };
 
   const value = {
@@ -137,10 +217,16 @@ export const AuthProvider = ({ children }) => {
     isAdmin,
     loading,
     token,
+    deviceSession,
+    deviceWarnings,
     login,
     logout,
     register,
     setCurrentUser,
+    clearDeviceWarnings,
+    getActiveDevices,
+    deactivateDevice,
+    deactivateOtherDevices,
   };
 
   return (

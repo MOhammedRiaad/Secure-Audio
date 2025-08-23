@@ -12,6 +12,7 @@ import {
   CircularProgress,
   Link as MuiLink
 } from '@mui/material';
+import DeviceWarnings from '../components/DeviceWarnings';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -21,7 +22,7 @@ const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, deviceWarnings } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -105,6 +106,13 @@ const Login = () => {
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
             </Alert>
+          )}
+          
+          {/* Show device warnings if user is authenticated */}
+          {isAuthenticated && deviceWarnings && deviceWarnings.length > 0 && (
+            <Box sx={{ mb: 2 }}>
+              <DeviceWarnings />
+            </Box>
           )}
           
           <Box component="form" onSubmit={handleSubmit} noValidate>

@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
 const ErrorResponse = require('../utils/errorResponse');
+const SessionManager = require('../utils/sessionManager');
+const DeviceFingerprint = require('../utils/deviceFingerprint');
 
 const prisma = new PrismaClient();
 
@@ -88,6 +90,23 @@ exports.protect = async (req, res, next) => {
     }
 
     console.log('User authenticated successfully:', { id: user.id, email: user.email, role: user.role });
+    
+    // Validate device session if deviceId is provided
+    const deviceId = req.headers['x-device-id'] || req.query.deviceId;
+    
+    if (deviceId) {
+      console.log('Validating device session for device:', deviceId);
+      
+      const sessionValidation = await SessionManager.validateSession(user.id, deviceId, req);
+      
+      if (!sessionValidation.valid) {
+        console.error('Device session validation failed:', sessionValidation.reason);
+        return next(new ErrorResponse(`Device session invalid: ${sessionValidation.reason}`, 401));
+      }
+      
+      console.log('Device session validated successfully');
+      req.deviceSession = sessionValidation.session;
+    }
     
     // Add user to request object
     req.user = user;

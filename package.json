@@ -37,8 +37,10 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
+    "nodemailer": "^7.0.5",
     "react-player": "^3.3.1",
     "react-router-dom": "^7.8.1",
+    "ua-parser-js": "^2.0.4",
     "xss-clean": "^0.1.4"
   },
   "devDependencies": {

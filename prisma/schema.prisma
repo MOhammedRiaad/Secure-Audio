@@ -8,22 +8,25 @@ datasource db {
 }
 
 model User {
-  id               Int          @id @default(autoincrement())
-  email            String       @unique
+  id               Int             @id @default(autoincrement())
+  email            String          @unique
   password         String
   name             String?
-  role             Role         @default(user)
-  isAdmin          Boolean      @default(false)
-  isLocked         Boolean      @default(false) @map("is_locked")
-  createdAt        DateTime     @default(now()) @map("created_at")
-  lastLogin        DateTime?    @map("last_login")
-  lockUntil        DateTime?    @map("lock_until")
-  loginAttempts    Int          @default(0)
-  resetToken       String?      @map("reset_token")
-  resetTokenExpire DateTime?    @map("reset_token_expire")
-  updatedAt        DateTime?    @default(now()) @updatedAt @map("updated_at")
+  role             Role            @default(user)
+  isAdmin          Boolean         @default(false)
+  isLocked         Boolean         @default(false) @map("is_locked")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  lastLogin        DateTime?       @map("last_login")
+  lockUntil        DateTime?       @map("lock_until")
+  loginAttempts    Int             @default(0)
+  resetToken       String?         @map("reset_token")
+  resetTokenExpire DateTime?       @map("reset_token_expire")
+  updatedAt        DateTime?       @default(now()) @updatedAt @map("updated_at")
+  maxDevices       Int             @default(1) @map("max_devices")
   checkpoints      Checkpoint[]
   fileAccesses     FileAccess[]
+  activeSessions   ActiveSession[]
+  deviceNotifications DeviceNotification[]
 
   @@map("users")
 }
@@ -76,6 +79,40 @@ model Checkpoint {
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([fileId, timestamp, userId])
+}
+
+model ActiveSession {
+  id              String    @id @default(cuid())
+  userId          Int       @map("user_id")
+  deviceId        String    @map("device_id")
+  deviceName      String?   @map("device_name")
+  deviceType      String?   @map("device_type")
+  deviceFingerprint String @map("device_fingerprint")
+  ipAddress       String    @map("ip_address")
+  userAgent       String    @map("user_agent")
+  isActive        Boolean   @default(true) @map("is_active")
+  lastActivity    DateTime  @default(now()) @map("last_activity")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  expiresAt       DateTime  @map("expires_at")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@map("active_sessions")
+}
+
+model DeviceNotification {
+  id          String   @id @default(cuid())
+  userId      Int      @map("user_id")
+  deviceId    String   @map("device_id")
+  deviceName  String?  @map("device_name")
+  ipAddress   String   @map("ip_address")
+  location    String?
+  isRead      Boolean  @default(false) @map("is_read")
+  notificationType String @map("notification_type") // 'new_device', 'device_locked', 'suspicious_activity'
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("device_notifications")
 }
 
 enum Role {
