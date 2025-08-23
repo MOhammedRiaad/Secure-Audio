@@ -215,6 +215,55 @@ exports.deleteUser = asyncHandler(async (req, res, next) => {
   });
 });
 
+// @desc    Unlock user
+// @route   PATCH /api/v1/admin/users/:id/unlock
+// @access  Private/Admin
+exports.unlockUser = asyncHandler(async (req, res, next) => {
+  const user = await prisma.user.findUnique({
+    where: {
+      id: parseInt(req.params.id),
+    },
+  });
+
+  if (!user) {
+    return next(
+      new ErrorResponse(`User not found with id of ${req.params.id}`, 404)
+    );
+  }
+
+  if (!user.isLocked) {
+    return next(
+      new ErrorResponse('User is not locked', 400)
+    );
+  }
+
+  // Unlock the user
+  const updatedUser = await prisma.user.update({
+    where: {
+      id: parseInt(req.params.id),
+    },
+    data: {
+      isLocked: false,
+      lockUntil: null,
+      failedLoginAttempts: 0,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isLocked: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  res.status(200).json({
+    success: true,
+    data: updatedUser,
+  });
+});
+
 // @desc    Get user count
 // @route   GET /api/v1/admin/users/count
 // @access  Private/Admin

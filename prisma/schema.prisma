@@ -41,6 +41,9 @@ model AudioFile {
   isEncrypted   Boolean      @default(false)
   encryptionKey String?
   encryptionIV  String?
+  coverImagePath String?     @map("cover_image_path")
+  coverImageBase64 String?   @map("cover_image_base64")
+  coverImageMimeType String? @map("cover_image_mime_type")
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   checkpoints   Checkpoint[]

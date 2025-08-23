@@ -18,12 +18,17 @@ import {
   LinearProgress,
   Divider,
   Grid,
+  RadioGroup,
+  Radio,
+  Card,
+  CardMedia,
 } from '@mui/material';
-import { CloudUpload as CloudUploadIcon, ArrowBack as ArrowBackIcon } from '@mui/icons-material';
+import { CloudUpload as CloudUploadIcon, ArrowBack as ArrowBackIcon, Image as ImageIcon } from '@mui/icons-material';
 
 const FileUpload = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const coverInputRef = useRef(null);
   
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -42,6 +47,11 @@ const FileUpload = () => {
     genre: '',
     year: '',
   });
+  
+  // Cover image fields
+  const [coverImage, setCoverImage] = useState(null);
+  const [coverPreview, setCoverPreview] = useState(null);
+  const [coverStorageType, setCoverStorageType] = useState('file'); // 'file' or 'base64'
 
   // Handle file selection
   const handleFileChange = (e) => {
@@ -103,6 +113,41 @@ const FileUpload = () => {
     e.stopPropagation();
   };
 
+  // Handle cover image selection
+  const handleCoverImageChange = (e) => {
+    const selectedFile = e.target.files[0];
+    
+    if (!selectedFile) return;
+    
+    // Validate file type
+    if (!selectedFile.type.startsWith('image/')) {
+      setError('Please select an image file (JPG, PNG, etc.)');
+      return;
+    }
+    
+    // Check file size (max 5MB)
+    if (selectedFile.size > 5 * 1024 * 1024) {
+      setError('Cover image must be less than 5MB');
+      return;
+    }
+    
+    // Set file and create preview
+    setCoverImage(selectedFile);
+    setCoverPreview(URL.createObjectURL(selectedFile));
+    
+    // Reset errors when a new file is selected
+    setError('');
+  };
+
+  // Remove cover image
+  const removeCoverImage = () => {
+    setCoverImage(null);
+    if (coverPreview) {
+      URL.revokeObjectURL(coverPreview);
+      setCoverPreview(null);
+    }
+  };
+
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -124,10 +169,16 @@ const FileUpload = () => {
       
       // Create form data
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('audio', file); // Changed from 'file' to 'audio'
       formData.append('title', title);
       formData.append('description', description);
       formData.append('isPublic', isPublic);
+      
+      // Add cover image if selected
+      if (coverImage) {
+        formData.append('cover', coverImage);
+        formData.append('coverStorageType', coverStorageType);
+      }
       
       // Add metadata if available
       if (metadata.artist) formData.append('artist', metadata.artist);
@@ -156,9 +207,15 @@ const FileUpload = () => {
       // Reset form after successful upload
       setFile(null);
       setPreview(null);
+      setCoverImage(null);
+      if (coverPreview) {
+        URL.revokeObjectURL(coverPreview);
+        setCoverPreview(null);
+      }
       setTitle('');
       setDescription('');
       setIsPublic(false);
+      setCoverStorageType('file');
       setMetadata({
         artist: '',
         album: '',
@@ -181,14 +238,17 @@ const FileUpload = () => {
     }
   };
 
-  // Clean up preview URL when component unmounts
+  // Clean up preview URLs when component unmounts
   useEffect(() => {
     return () => {
       if (preview) {
         URL.revokeObjectURL(preview);
       }
+      if (coverPreview) {
+        URL.revokeObjectURL(coverPreview);
+      }
     };
-  }, [preview]);
+  }, [preview, coverPreview]);
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
@@ -279,6 +339,9 @@ const FileUpload = () => {
             <Typography variant="body2" color="text.secondary">
               Supported formats: MP3, WAV, AAC, OGG, etc.
             </Typography>
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+              Maximum file size: 2GB
+            </Typography>
           </Box>
         )}
       </Paper>
@@ -322,6 +385,88 @@ const FileUpload = () => {
                   label="Make this file public"
                   sx={{ mt: 2, display: 'block' }}
                 />
+                
+                <Divider sx={{ my: 3 }} />
+                
+                {/* Cover Image Section */}
+                <Typography variant="subtitle2" gutterBottom>
+                  Cover Image (Optional)
+                </Typography>
+                
+                {coverPreview ? (
+                  <Card sx={{ maxWidth: 200, mb: 2 }}>
+                    <CardMedia
+                      component="img"
+                      height="200"
+                      image={coverPreview}
+                      alt="Cover preview"
+                    />
+                    <Box p={1}>
+                      <Button
+                        size="small"
+                        color="error"
+                        onClick={removeCoverImage}
+                        fullWidth
+                      >
+                        Remove
+                      </Button>
+                    </Box>
+                  </Card>
+                ) : (
+                  <Paper
+                    variant="outlined"
+                    sx={{
+                      p: 2,
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      mb: 2,
+                      '&:hover': {
+                        backgroundColor: 'action.hover',
+                      },
+                    }}
+                    onClick={() => coverInputRef.current.click()}
+                  >
+                    <ImageIcon sx={{ fontSize: 40, color: 'text.secondary', mb: 1 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      Click to select cover image
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Supported formats: JPG, PNG, GIF, WebP
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Maximum file size: 5MB
+                    </Typography>
+                  </Paper>
+                )}
+                
+                <input
+                  type="file"
+                  ref={coverInputRef}
+                  onChange={handleCoverImageChange}
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                />
+                
+                {/* Storage Type Selection */}
+                <FormControl component="fieldset" sx={{ mt: 2 }}>
+                  <FormLabel component="legend">Cover Image Storage</FormLabel>
+                  <RadioGroup
+                    value={coverStorageType}
+                    onChange={(e) => setCoverStorageType(e.target.value)}
+                    row
+                  >
+                    <FormControlLabel
+                      value="file"
+                      control={<Radio />}
+                      label="File Storage"
+                    />
+                    <FormControlLabel
+                      value="base64"
+                      control={<Radio />}
+                      label="Database Storage"
+                    />
+                  </RadioGroup>
+                </FormControl>
               </Grid>
               
               <Grid item xs={12} md={6}>

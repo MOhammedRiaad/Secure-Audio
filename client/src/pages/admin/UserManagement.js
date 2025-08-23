@@ -30,6 +30,7 @@ import {
   Delete as DeleteIcon,
   Search as SearchIcon,
   PersonAdd as PersonAddIcon,
+  LockOpen as UnlockIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 
@@ -45,6 +46,7 @@ const UserManagement = () => {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [unlockLoading, setUnlockLoading] = useState({});
   
   const navigate = useNavigate();
 
@@ -130,6 +132,38 @@ const UserManagement = () => {
 
   const handleCreateUser = () => {
     navigate('/admin/users/new');
+  };
+
+  const handleUnlockUser = async (user) => {
+    try {
+      setUnlockLoading(prev => ({ ...prev, [user.id]: true }));
+      
+      await axios.patch(`/api/v1/admin/users/${user.id}/unlock`);
+      
+      // Update the user in the list
+      setUsers(users.map(u => 
+        u.id === user.id 
+          ? { ...u, isLocked: false, lockUntil: null }
+          : u
+      ));
+      
+      setSuccessMessage(`User ${user.email} has been unlocked successfully`);
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => {
+        setSuccessMessage('');
+      }, 5000);
+    } catch (err) {
+      setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to unlock user');
+      console.error('Error unlocking user:', err);
+      
+      // Clear error message after 5 seconds
+      setTimeout(() => {
+        setError('');
+      }, 5000);
+    } finally {
+      setUnlockLoading(prev => ({ ...prev, [user.id]: false }));
+    }
   };
 
   if (loading) {
@@ -243,10 +277,26 @@ const UserManagement = () => {
                       {user.createdAt ? format(new Date(user.createdAt), 'MMM d, yyyy') : 'N/A'}
                     </TableCell>
                     <TableCell align="right">
+                      {user.isLocked && (
+                        <IconButton
+                          size="small"
+                          onClick={() => handleUnlockUser(user)}
+                          color="success"
+                          disabled={unlockLoading[user.id]}
+                          title="Unlock User"
+                        >
+                          {unlockLoading[user.id] ? (
+                            <CircularProgress size={16} />
+                          ) : (
+                            <UnlockIcon />
+                          )}
+                        </IconButton>
+                      )}
                       <IconButton
                         size="small"
                         onClick={() => handleEditUser(user.id)}
                         color="primary"
+                        title="Edit User"
                       >
                         <EditIcon />
                       </IconButton>
@@ -255,6 +305,7 @@ const UserManagement = () => {
                         onClick={() => handleDeleteClick(user)}
                         color="error"
                         disabled={user.isAdmin} // Prevent deleting admin users
+                        title="Delete User"
                       >
                         <DeleteIcon />
                       </IconButton>

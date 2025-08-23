@@ -21,6 +21,9 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
+  Grid,
+  Card,
+  CardMedia,
 } from '@mui/material';
 import {
   Add,
@@ -148,21 +151,45 @@ const AudioPlayer = () => {
       <Button onClick={() => navigate(-1)} sx={{ mb: 2 }}>Back to Library</Button>
       
       <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          {audioFile.title}
-        </Typography>
-        
-        {audioFile.description && (
-          <Typography variant="body1" color="text.secondary" paragraph>
-            {audioFile.description}
-          </Typography>
-        )}
-        
-        {/* DRM Audio Player */}
-        <DRMPlayer 
-          fileId={parseInt(id)}
-          onError={(error) => setError(error)}
-        />
+        <Grid container spacing={3}>
+          {/* Cover Image */}
+          {(audioFile.coverImagePath || audioFile.coverImageBase64) && (
+            <Grid item xs={12} md={4}>
+              <Card>
+                <CardMedia
+                  component="img"
+                  height="300"
+                  image={
+                    audioFile.coverImageBase64
+                      ? audioFile.coverImageBase64
+                      : `/api/v1/files/cover/${audioFile.id}`
+                  }
+                  alt={`${audioFile.title} cover`}
+                  sx={{ objectFit: 'cover' }}
+                />
+              </Card>
+            </Grid>
+          )}
+          
+          {/* Audio Info and Player */}
+          <Grid item xs={12} md={(audioFile.coverImagePath || audioFile.coverImageBase64) ? 8 : 12}>
+            <Typography variant="h4" component="h1" gutterBottom>
+              {audioFile.title}
+            </Typography>
+            
+            {audioFile.description && (
+              <Typography variant="body1" color="text.secondary" paragraph>
+                {audioFile.description}
+              </Typography>
+            )}
+            
+            {/* DRM Audio Player */}
+            <DRMPlayer 
+              fileId={parseInt(id)}
+              onError={(error) => setError(error)}
+            />
+          </Grid>
+        </Grid>
       </Paper>
       
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>

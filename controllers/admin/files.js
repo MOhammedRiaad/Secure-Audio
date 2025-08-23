@@ -145,6 +145,7 @@ exports.getFileStats = asyncHandler(async (req, res, next) => {
   const [
     totalFiles,
     totalSize,
+    totalDuration,
     publicFiles,
     privateFiles,
     filesByType,
@@ -157,6 +158,13 @@ exports.getFileStats = asyncHandler(async (req, res, next) => {
     prisma.audioFile.aggregate({
       _sum: {
         size: true,
+      },
+    }),
+    
+    // Total duration
+    prisma.audioFile.aggregate({
+      _sum: {
+        duration: true,
       },
     }),
     
@@ -204,8 +212,10 @@ exports.getFileStats = asyncHandler(async (req, res, next) => {
   res.status(200).json({
     success: true,
     data: {
+      fileCount: totalFiles,
       totalFiles,
       totalSize: totalSize._sum.size || 0,
+      totalDuration: totalDuration._sum.duration || 0,
       publicFiles,
       privateFiles,
       filesByType,

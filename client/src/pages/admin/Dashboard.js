@@ -15,12 +15,17 @@ import {
   Audiotrack as AudiotrackIcon,
   BarChart as BarChartIcon,
 } from '@mui/icons-material';
+import { format } from 'date-fns';
 
 const AdminDashboard = () => {
   const [stats, setStats] = useState({
     users: 0,
     audioFiles: 0,
     totalPlayTime: 0,
+    recentUploads: [],
+    publicFiles: 0,
+    privateFiles: 0,
+    totalSize: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -37,9 +42,13 @@ const AdminDashboard = () => {
         ]);
 
         setStats({
-          users: usersRes.data.count || 0,
-          audioFiles: filesRes.data.fileCount || 0,
-          totalPlayTime: filesRes.data.totalDuration || 0,
+          users: usersRes.data.data.count || 0,
+          audioFiles: filesRes.data.data.fileCount || 0,
+          totalPlayTime: filesRes.data.data.totalDuration || 0,
+          recentUploads: filesRes.data.data.recentUploads || [],
+          publicFiles: filesRes.data.data.publicFiles || 0,
+          privateFiles: filesRes.data.data.privateFiles || 0,
+          totalSize: filesRes.data.data.totalSize || 0,
         });
       } catch (err) {
         setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to load dashboard statistics');
@@ -64,6 +73,13 @@ const AdminDashboard = () => {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '0 B';
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
+  };
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
@@ -85,7 +101,7 @@ const AdminDashboard = () => {
       )}
       
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
           <Paper sx={{ p: 3, height: '100%' }}>
             <Box display="flex" alignItems="center" mb={2}>
               <PeopleIcon color="primary" sx={{ fontSize: 40, mr: 2 }} />
@@ -106,13 +122,16 @@ const AdminDashboard = () => {
           </Paper>
         </Grid>
         
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
           <Paper sx={{ p: 3, height: '100%' }}>
             <Box display="flex" alignItems="center" mb={2}>
               <AudiotrackIcon color="primary" sx={{ fontSize: 40, mr: 2 }} />
               <Box>
                 <Typography variant="h4">{stats.audioFiles}</Typography>
                 <Typography variant="body2" color="text.secondary">Audio Files</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {stats.publicFiles} public • {stats.privateFiles} private
+                </Typography>
               </Box>
             </Box>
             <Button
@@ -127,7 +146,7 @@ const AdminDashboard = () => {
           </Paper>
         </Grid>
         
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
           <Paper sx={{ p: 3, height: '100%' }}>
             <Box display="flex" alignItems="center" mb={2}>
               <BarChartIcon color="primary" sx={{ fontSize: 40, mr: 2 }} />
@@ -143,6 +162,25 @@ const AdminDashboard = () => {
               disabled
             >
               View Analytics
+            </Button>
+          </Paper>
+        </Grid>
+        
+        <Grid item xs={12} md={3}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Box display="flex" alignItems="center" mb={2}>
+              <Box>
+                <Typography variant="h4">{formatFileSize(stats.totalSize)}</Typography>
+                <Typography variant="body2" color="text.secondary">Storage Used</Typography>
+              </Box>
+            </Box>
+            <Button
+              variant="outlined"
+              fullWidth
+              sx={{ mt: 2 }}
+              disabled
+            >
+              Manage Storage
             </Button>
           </Paper>
         </Grid>
@@ -182,13 +220,28 @@ const AdminDashboard = () => {
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
-              Recent Activity
+              Recent Uploads
             </Typography>
             <Box mt={2}>
-              <Typography color="text.secondary" fontStyle="italic">
-                Recent activity will appear here
-              </Typography>
-              {/* In a real app, you would map through recent activity items */}
+              {stats.recentUploads.length > 0 ? (
+                stats.recentUploads.map((file) => (
+                  <Box key={file.id} sx={{ mb: 2, pb: 2, borderBottom: '1px solid #eee' }}>
+                    <Typography variant="subtitle2" fontWeight="bold">
+                      {file.title}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {file.filename} • {formatDuration(file.duration)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {format(new Date(file.createdAt), 'MMM d, yyyy')}
+                    </Typography>
+                  </Box>
+                ))
+              ) : (
+                <Typography color="text.secondary" fontStyle="italic">
+                  No recent uploads
+                </Typography>
+              )}
             </Box>
           </Paper>
         </Grid>

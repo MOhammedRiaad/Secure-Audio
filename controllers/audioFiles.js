@@ -3,6 +3,7 @@ const ErrorResponse = require('../utils/errorResponse');
 const asyncHandler = require('../middleware/async');
 const { generateStreamToken, validateStreamToken } = require('../utils/streamToken');
 const AudioDRM = require('../utils/drm');
+const { bufferToBase64 } = require('../middleware/imageUpload');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -114,24 +115,52 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/files
 // @access  Private/Admin
 exports.uploadAudioFile = asyncHandler(async (req, res, next) => {
-  if (!req.file) {
-    return next(new ErrorResponse(`Please upload a file`, 400));
+  if (!req.files || req.files.length === 0) {
+    return next(new ErrorResponse(`Please upload an audio file`, 400));
   }
 
-  const file = req.file;
+  // Find audio and cover files from the uploaded files
+  const audioFile = req.files.find(file => file.fieldname === 'audio');
+  const coverFile = req.files.find(file => file.fieldname === 'cover');
+  
+  if (!audioFile) {
+    return next(new ErrorResponse(`Please upload an audio file`, 400));
+  }
 
   // Check if file is audio
-  if (!file.mimetype.startsWith('audio/')) {
+  if (!audioFile.mimetype.startsWith('audio/')) {
     return next(new ErrorResponse(`Please upload an audio file`, 400));
   }
 
   // Multer has already saved the file, use the generated filename
-  const uploadPath = file.path;
-  const fileName = path.basename(file.path);
+  const uploadPath = audioFile.path;
+  const fileName = path.basename(audioFile.path);
   const encryptedFileName = `encrypted_${fileName}`;
   const encryptedPath = path.join(path.dirname(uploadPath), encryptedFileName);
 
+  let coverImagePath = null;
+  let coverImageBase64 = null;
+  let coverImageMimeType = null;
+
   try {
+    // Process cover image if provided
+    if (coverFile) {
+      coverImageMimeType = coverFile.mimetype;
+      
+      // Check storage preference from request body
+      const useBase64 = req.body.coverStorageType === 'base64';
+      
+      if (useBase64) {
+        // Convert to base64 and remove the file
+        const imageBuffer = fs.readFileSync(coverFile.path);
+        coverImageBase64 = bufferToBase64(imageBuffer, coverFile.mimetype);
+        fs.unlinkSync(coverFile.path); // Clean up the temporary file
+      } else {
+        // Use file path storage
+        coverImagePath = path.basename(coverFile.path);
+      }
+    }
+
     // Get file duration using ffmpeg if available, otherwise use 0
     const duration = await getAudioDuration(uploadPath);
     
@@ -143,39 +172,45 @@ exports.uploadAudioFile = asyncHandler(async (req, res, next) => {
       fs.unlinkSync(uploadPath);
     }
     
-    // Create file in database with encryption metadata
-    const audioFile = await prisma.audioFile.create({
+    // Create file in database with encryption metadata and cover image
+    const audioFileRecord = await prisma.audioFile.create({
       data: {
-        filename: file.originalname,
+        filename: audioFile.originalname,
         path: encryptedFileName,
-        mimeType: file.mimetype,
-        size: file.size,
+        mimeType: audioFile.mimetype,
+        size: audioFile.size,
         duration,
-        title: req.body.title || path.parse(file.originalname).name,
+        title: req.body.title || path.parse(audioFile.originalname).name,
         description: req.body.description || null,
         isPublic: req.body.isPublic === 'true' || false,
         isEncrypted: true,
         encryptionKey: encryptionResult.key,
-        encryptionIV: encryptionResult.iv
+        encryptionIV: encryptionResult.iv,
+        coverImagePath,
+        coverImageBase64,
+        coverImageMimeType
       }
     });
     
     return res.status(201).json({
       success: true,
       data: {
-        ...audioFile,
+        ...audioFileRecord,
         // Don't expose encryption keys in response
         encryptionKey: undefined,
         encryptionIV: undefined
       }
     });
   } catch (error) {
-    // Clean up both original and encrypted files if there was an error
+    // Clean up files if there was an error
     if (fs.existsSync(uploadPath)) {
       fs.unlinkSync(uploadPath);
     }
     if (fs.existsSync(encryptedPath)) {
       fs.unlinkSync(encryptedPath);
+    }
+    if (coverFile && fs.existsSync(coverFile.path)) {
+      fs.unlinkSync(coverFile.path);
     }
     console.error('Error processing file upload:', error);
     return next(new ErrorResponse('Error processing file upload', 500));

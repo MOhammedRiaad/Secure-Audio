@@ -6,7 +6,8 @@ const {
   createUser,
   updateUser,
   deleteUser,
-  getUserCount
+  getUserCount,
+  unlockUser
 } = require('../../controllers/admin/users');
 
 const router = express.Router();
@@ -26,5 +27,8 @@ router.route('/:id')
   .get(getUser)
   .put(updateUser)
   .delete(deleteUser);
+
+router.route('/:id/unlock')
+  .patch(unlockUser);
 
 module.exports = router;
