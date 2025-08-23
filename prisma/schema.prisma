@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               Int          @id @default(autoincrement())
+  email            String       @unique
+  password         String
+  name             String?
+  role             Role         @default(user)
+  isAdmin          Boolean      @default(false)
+  isLocked         Boolean      @default(false) @map("is_locked")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  lastLogin        DateTime?    @map("last_login")
+  lockUntil        DateTime?    @map("lock_until")
+  loginAttempts    Int          @default(0)
+  resetToken       String?      @map("reset_token")
+  resetTokenExpire DateTime?    @map("reset_token_expire")
+  updatedAt        DateTime?    @default(now()) @updatedAt @map("updated_at")
+  checkpoints      Checkpoint[]
+  fileAccesses     FileAccess[]
+
+  @@map("users")
+}
+
+model AudioFile {
+  id           Int          @id @default(autoincrement())
+  filename     String
+  path         String       @unique
+  mimeType     String
+  size         Int
+  duration     Float
+  title        String
+  description  String?
+  isPublic     Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  checkpoints  Checkpoint[]
+  fileAccesses FileAccess[]
+}
+
+model FileAccess {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  fileId    Int
+  canView   Boolean   @default(true)
+  grantedAt DateTime  @default(now())
+  expiresAt DateTime?
+  audioFile AudioFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fileId])
+}
+
+model Checkpoint {
+  id          Int       @id @default(autoincrement())
+  fileId      Int
+  userId      Int
+  timestamp   Float
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  audioFile   AudioFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, timestamp, userId])
+}
+
+enum Role {
+  user
+  admin
+}
