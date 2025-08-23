@@ -12,14 +12,18 @@ const prisma = new PrismaClient();
 exports.getFiles = asyncHandler(async (req, res, next) => {
   const files = await prisma.audioFile.findMany({
     include: {
-      user: {
+      fileAccesses: {
         select: {
-          id: true,
-          name: true,
-          email: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
         },
       },
-      access: {
+      checkpoints: {
         select: {
           user: {
             select: {
@@ -49,17 +53,10 @@ exports.getFiles = asyncHandler(async (req, res, next) => {
 exports.getFile = asyncHandler(async (req, res, next) => {
   const file = await prisma.audioFile.findUnique({
     where: {
-      id: req.params.id,
+      id: parseInt(req.params.id),
     },
     include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
-      },
-      access: {
+      fileAccesses: {
         select: {
           user: {
             select: {
@@ -73,6 +70,15 @@ exports.getFile = asyncHandler(async (req, res, next) => {
       checkpoints: {
         orderBy: {
           timestamp: 'asc',
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
         },
       },
     },
@@ -96,7 +102,7 @@ exports.getFile = asyncHandler(async (req, res, next) => {
 exports.deleteFile = asyncHandler(async (req, res, next) => {
   const file = await prisma.audioFile.findUnique({
     where: {
-      id: req.params.id,
+      id: parseInt(req.params.id),
     },
   });
 
@@ -116,13 +122,13 @@ exports.deleteFile = asyncHandler(async (req, res, next) => {
   // Delete related records first (FileAccess, Checkpoints)
   await prisma.$transaction([
     prisma.fileAccess.deleteMany({
-      where: { fileId: req.params.id },
+      where: { fileId: parseInt(req.params.id) },
     }),
     prisma.checkpoint.deleteMany({
-      where: { fileId: req.params.id },
+      where: { fileId: parseInt(req.params.id) },
     }),
     prisma.audioFile.delete({
-      where: { id: req.params.id },
+      where: { id: parseInt(req.params.id) },
     }),
   ]);
 
