@@ -40,6 +40,7 @@ import {
   Cancel as CancelIcon,
   AudioFile as AudioFileIcon,
   ManageAccounts as ManageAccountsIcon,
+  ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 
@@ -189,6 +190,13 @@ const FileManagement = () => {
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Button
+        startIcon={<ArrowBackIcon />}
+        onClick={() => navigate('/admin')}
+        sx={{ mb: 2 }}
+      >
+        Back to Admin Dashboard
+      </Button>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
         <Typography variant="h4" component="h1">
           File Management

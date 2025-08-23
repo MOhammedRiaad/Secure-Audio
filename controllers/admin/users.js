@@ -245,7 +245,7 @@ exports.unlockUser = asyncHandler(async (req, res, next) => {
     data: {
       isLocked: false,
       lockUntil: null,
-      failedLoginAttempts: 0,
+      loginAttempts: 0,
     },
     select: {
       id: true,
@@ -261,6 +261,120 @@ exports.unlockUser = asyncHandler(async (req, res, next) => {
   res.status(200).json({
     success: true,
     data: updatedUser,
+  });
+});
+
+// @desc    Get user sessions
+// @route   GET /api/v1/admin/users/:id/sessions
+// @access  Private/Admin
+exports.getUserSessions = asyncHandler(async (req, res, next) => {
+  const userId = parseInt(req.params.id);
+
+  // Check if user exists
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!user) {
+    return next(new ErrorResponse('User not found', 404));
+  }
+
+  const sessions = await prisma.activeSession.findMany({
+    where: {
+      userId: userId,
+      isActive: true,
+    },
+    orderBy: {
+      lastActivity: 'desc',
+    },
+  });
+
+  res.status(200).json({
+    success: true,
+    count: sessions.length,
+    data: sessions,
+  });
+});
+
+// @desc    Terminate user session
+// @route   DELETE /api/v1/admin/users/:id/sessions/:sessionId
+// @access  Private/Admin
+exports.terminateUserSession = asyncHandler(async (req, res, next) => {
+  const userId = parseInt(req.params.id);
+  const sessionId = req.params.sessionId;
+
+  // Check if user exists
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!user) {
+    return next(new ErrorResponse('User not found', 404));
+  }
+
+  // Find and deactivate the session
+  const session = await prisma.activeSession.findFirst({
+    where: {
+      id: sessionId,
+      userId: userId,
+      isActive: true,
+    },
+  });
+
+  if (!session) {
+    return next(new ErrorResponse('Session not found or already terminated', 404));
+  }
+
+  await prisma.activeSession.update({
+    where: { id: sessionId },
+    data: { isActive: false },
+  });
+
+  res.status(200).json({
+    success: true,
+    message: 'Session terminated successfully',
+  });
+});
+
+// @desc    Get users with session counts
+// @route   GET /api/v1/admin/users/with-sessions
+// @access  Private/Admin
+exports.getUsersWithSessions = asyncHandler(async (req, res, next) => {
+  const users = await prisma.user.findMany({
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isLocked: true,
+      createdAt: true,
+      updatedAt: true,
+      activeSessions: {
+        where: {
+          isActive: true,
+        },
+        select: {
+          id: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
+
+  // Transform data to include session count and multi-session flag
+  const usersWithSessionInfo = users.map(user => ({
+    ...user,
+    sessionCount: user.activeSessions.length,
+    hasMultipleSessions: user.activeSessions.length > 1,
+    activeSessions: undefined, // Remove the sessions array from response
+  }));
+
+  res.status(200).json({
+    success: true,
+    count: usersWithSessionInfo.length,
+    data: usersWithSessionInfo,
   });
 });
 

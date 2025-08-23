@@ -7,7 +7,10 @@ const {
   updateUser,
   deleteUser,
   getUserCount,
-  unlockUser
+  unlockUser,
+  getUserSessions,
+  terminateUserSession,
+  getUsersWithSessions
 } = require('../../controllers/admin/users');
 
 const router = express.Router();
@@ -23,6 +26,9 @@ router.route('/')
 router.route('/count')
   .get(getUserCount);
 
+router.route('/with-sessions')
+  .get(getUsersWithSessions);
+
 router.route('/:id')
   .get(getUser)
   .put(updateUser)
@@ -30,5 +36,11 @@ router.route('/:id')
 
 router.route('/:id/unlock')
   .patch(unlockUser);
+
+router.route('/:id/sessions')
+  .get(getUserSessions);
+
+router.route('/:id/sessions/:sessionId')
+  .delete(terminateUserSession);
 
 module.exports = router;

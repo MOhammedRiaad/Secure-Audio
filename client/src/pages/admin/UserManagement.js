@@ -31,6 +31,8 @@ import {
   Search as SearchIcon,
   PersonAdd as PersonAddIcon,
   LockOpen as UnlockIcon,
+  ArrowBack as ArrowBackIcon,
+  Security as SecurityIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 
@@ -54,7 +56,7 @@ const UserManagement = () => {
     const fetchUsers = async () => {
       try {
         setLoading(true);
-        const res = await axios.get('/api/v1/admin/users');
+        const res = await axios.get('/api/v1/admin/users/with-sessions');
         setUsers(res.data.data || []);
       } catch (err) {
         setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to load users');
@@ -176,6 +178,13 @@ const UserManagement = () => {
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Button
+        startIcon={<ArrowBackIcon />}
+        onClick={() => navigate('/admin')}
+        sx={{ mb: 2 }}
+      >
+        Back to Admin Dashboard
+      </Button>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
         <Typography variant="h4" component="h1">
           User Management
@@ -223,6 +232,7 @@ const UserManagement = () => {
               <TableCell>Email</TableCell>
               <TableCell>Role</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>Sessions</TableCell>
               <TableCell>Joined</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
@@ -230,7 +240,7 @@ const UserManagement = () => {
           <TableBody>
             {filteredUsers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
                   {searchTerm ? 'No matching users found' : 'No users available'}
                 </TableCell>
               </TableRow>
@@ -272,6 +282,24 @@ const UserManagement = () => {
                         size="small"
                         variant="outlined"
                       />
+                    </TableCell>
+                    <TableCell>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Chip
+                          label={`${user.sessionCount || 0} active`}
+                          color={user.hasMultipleSessions ? 'warning' : 'default'}
+                          size="small"
+                          variant={user.hasMultipleSessions ? 'filled' : 'outlined'}
+                        />
+                        {user.hasMultipleSessions && (
+                          <Chip
+                            label="Multi-session"
+                            color="warning"
+                            size="small"
+                            icon={<SecurityIcon />}
+                          />
+                        )}
+                      </Box>
                     </TableCell>
                     <TableCell>
                       {user.createdAt ? format(new Date(user.createdAt), 'MMM d, yyyy') : 'N/A'}

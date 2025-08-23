@@ -14,6 +14,7 @@ import {
   People as PeopleIcon,
   Audiotrack as AudiotrackIcon,
   BarChart as BarChartIcon,
+  ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 
@@ -90,6 +91,13 @@ const AdminDashboard = () => {
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Button
+        startIcon={<ArrowBackIcon />}
+        onClick={() => navigate('/')}
+        sx={{ mb: 2 }}
+      >
+        Back to Library
+      </Button>
       <Typography variant="h4" component="h1" gutterBottom>
         Admin Dashboard
       </Typography>
