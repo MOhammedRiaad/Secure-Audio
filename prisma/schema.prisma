@@ -29,19 +29,22 @@ model User {
 }
 
 model AudioFile {
-  id           Int          @id @default(autoincrement())
-  filename     String
-  path         String       @unique
-  mimeType     String
-  size         Int
-  duration     Float
-  title        String
-  description  String?
-  isPublic     Boolean      @default(false)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  checkpoints  Checkpoint[]
-  fileAccesses FileAccess[]
+  id            Int          @id @default(autoincrement())
+  filename      String
+  path          String       @unique
+  mimeType      String
+  size          Int
+  duration      Float
+  title         String
+  description   String?
+  isPublic      Boolean      @default(false)
+  isEncrypted   Boolean      @default(false)
+  encryptionKey String?
+  encryptionIV  String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  checkpoints   Checkpoint[]
+  fileAccesses  FileAccess[]
 }
 
 model FileAccess {

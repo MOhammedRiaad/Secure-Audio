@@ -77,26 +77,30 @@ export const AuthProvider = ({ children }) => {
   // Login user
   const login = async (email, password) => {
     try {
-      console.log('Attempting login with email:', email);
+      console.log('AuthContext: Attempting login with email:', email);
       
       // Use the API client for login to maintain consistent flow
-      // We need to use a direct URL here to avoid circular dependencies
+      console.log('AuthContext: Making API call to /auth/login');
       const response = await api.post(
         '/auth/login', 
         { email, password }
       );
       
+      console.log('AuthContext: Raw response:', response);
       const { data } = response;
+      console.log('AuthContext: Response data:', data);
       
       if (!data.success) {
+        console.error('AuthContext: Login failed - success is false');
         throw new Error(data.message || 'Login failed');
       }
       
-      console.log('Login response:', data);
+      console.log('AuthContext: Login response successful:', data);
       
       // Get the token from the response body
       const { token, user } = data;
-      console.log('Received token:', token ? 'Token received' : 'No token received');
+      console.log('AuthContext: Extracted token:', token ? 'Token received' : 'No token received');
+      console.log('AuthContext: Extracted user:', user);
       
       if (!token) {
         throw new Error('No token received from server');
@@ -132,6 +136,7 @@ export const AuthProvider = ({ children }) => {
     isAuthenticated: !!currentUser,
     isAdmin,
     loading,
+    token,
     login,
     logout,
     register,

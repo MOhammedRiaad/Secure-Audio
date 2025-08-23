@@ -1,6 +1,8 @@
 const { PrismaClient } = require('@prisma/client');
 const ErrorResponse = require('../utils/errorResponse');
 const asyncHandler = require('../middleware/async');
+const { generateStreamToken, validateStreamToken } = require('../utils/streamToken');
+const AudioDRM = require('../utils/drm');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -8,22 +10,26 @@ let ffmpeg;
 let ffmpegAvailable = false;
 
 try {
-  ffmpeg = require('fluent-ffmpeg');
-  const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-  ffmpeg.setFfmpegPath(ffmpegPath);
-  ffmpegAvailable = true;
-} catch (error) {
+    ffmpeg = require('fluent-ffmpeg');
+    const ffprobeStatic = require('ffprobe-static');
+    ffmpeg.setFfprobePath(ffprobeStatic.path);
+    ffmpegAvailable = true;
+  } catch (error) {
   console.warn('FFmpeg not available. Audio duration detection will be limited.');
 }
 
 const prisma = new PrismaClient();
+const drm = new AudioDRM();
 
 // @desc    Get all audio files (with access)
 // @route   GET /api/v1/files
 // @access  Private
 exports.getAudioFiles = asyncHandler(async (req, res, next) => {
-  const files = await prisma.audioFile.findMany({
-    where: {
+  let whereClause = {};
+  
+  // Admins can see all files, regular users only see public files or files they have access to
+  if (req.user.role !== 'admin') {
+    whereClause = {
       OR: [
         { isPublic: true },
         {
@@ -39,7 +45,11 @@ exports.getAudioFiles = asyncHandler(async (req, res, next) => {
           }
         }
       ]
-    },
+    };
+  }
+  
+  const files = await prisma.audioFile.findMany({
+    where: whereClause,
     include: {
       checkpoints: {
         where: {
@@ -83,13 +93,15 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
     );
   }
 
-  // Check if user has access
-  const hasAccess = await checkFileAccess(req.user.id, file.id);
-  
-  if (!hasAccess && !file.isPublic) {
-    return next(
-      new ErrorResponse(`Not authorized to access this file`, 403)
-    );
+  // Check if user has access (admins have access to all files)
+  if (req.user.role !== 'admin') {
+    const hasAccess = await checkFileAccess(req.user.id, file.id);
+    
+    if (!hasAccess && !file.isPublic) {
+      return next(
+        new ErrorResponse(`Not authorized to access this file`, 403)
+      );
+    }
   }
 
   res.status(200).json({
@@ -116,39 +128,58 @@ exports.uploadAudioFile = asyncHandler(async (req, res, next) => {
   // Multer has already saved the file, use the generated filename
   const uploadPath = file.path;
   const fileName = path.basename(file.path);
+  const encryptedFileName = `encrypted_${fileName}`;
+  const encryptedPath = path.join(path.dirname(uploadPath), encryptedFileName);
 
   try {
     // Get file duration using ffmpeg if available, otherwise use 0
     const duration = await getAudioDuration(uploadPath);
     
-    // Create file in database
+    // Encrypt the audio file at rest
+    const encryptionResult = await drm.encryptAudioFile(uploadPath, encryptedPath);
+    
+    // Remove the original unencrypted file
+    if (fs.existsSync(uploadPath)) {
+      fs.unlinkSync(uploadPath);
+    }
+    
+    // Create file in database with encryption metadata
     const audioFile = await prisma.audioFile.create({
       data: {
         filename: file.originalname,
-        path: fileName,
+        path: encryptedFileName,
         mimeType: file.mimetype,
         size: file.size,
         duration,
         title: req.body.title || path.parse(file.originalname).name,
         description: req.body.description || null,
-        isPublic: req.body.isPublic === 'true' || false
+        isPublic: req.body.isPublic === 'true' || false,
+        isEncrypted: true,
+        encryptionKey: encryptionResult.key,
+        encryptionIV: encryptionResult.iv
       }
     });
     
     return res.status(201).json({
       success: true,
-      data: audioFile
+      data: {
+        ...audioFile,
+        // Don't expose encryption keys in response
+        encryptionKey: undefined,
+        encryptionIV: undefined
+      }
     });
   } catch (error) {
-    // Clean up the uploaded file if there was an error
+    // Clean up both original and encrypted files if there was an error
     if (fs.existsSync(uploadPath)) {
       fs.unlinkSync(uploadPath);
+    }
+    if (fs.existsSync(encryptedPath)) {
+      fs.unlinkSync(encryptedPath);
     }
     console.error('Error processing file upload:', error);
     return next(new ErrorResponse('Error processing file upload', 500));
   }
-
-  // Response is now handled in the try block
 });
 
 // @desc    Generate a secure stream token
@@ -163,11 +194,13 @@ exports.generateStreamToken = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('File not found', 404));
   }
 
-  // Check if user has access
-  const hasAccess = await checkFileAccess(req.user.id, file.id);
-  
-  if (!hasAccess && !file.isPublic) {
-    return next(new ErrorResponse('Not authorized to access this file', 403));
+  // Check if user has access (admins have access to all files)
+  if (req.user.role !== 'admin') {
+    const hasAccess = await checkFileAccess(req.user.id, file.id);
+    
+    if (!hasAccess && !file.isPublic) {
+      return next(new ErrorResponse('Not authorized to access this file', 403));
+    }
   }
 
   // Generate a secure token
@@ -199,10 +232,18 @@ exports.streamAudioFile = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('File not found', 404));
   }
   
-  // Verify the user still has access
-  const hasAccess = await checkFileAccess(userId, file.id);
-  if (!hasAccess && !file.isPublic) {
-    return next(new ErrorResponse('Access to this file has been revoked', 403));
+  // Get user information to check if they're an admin
+  const user = await prisma.user.findUnique({
+    where: { id: parseInt(userId) },
+    select: { role: true }
+  });
+  
+  // Verify the user still has access (admins have access to all files)
+  if (user && user.role !== 'admin') {
+    const hasAccess = await checkFileAccess(userId, file.id);
+    if (!hasAccess && !file.isPublic) {
+      return next(new ErrorResponse('Access to this file has been revoked', 403));
+    }
   }
 
   const filePath = path.join(process.env.FILE_UPLOAD_PATH, file.path);
@@ -212,9 +253,6 @@ exports.streamAudioFile = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('File not found on server', 404));
   }
 
-  const stat = fs.statSync(filePath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
   const mimeType = file.mimeType || 'audio/mpeg'; // Default to audio/mpeg if not set
 
   // Security headers to prevent download and caching
@@ -231,6 +269,42 @@ exports.streamAudioFile = asyncHandler(async (req, res, next) => {
     'Expires': '0',
     'Surrogate-Control': 'no-store'
   };
+
+  // Handle encrypted files
+  if (file.isEncrypted && file.encryptionKey && file.encryptionIV) {
+    try {
+      // Create a temporary decrypted stream
+      const decryptedStream = drm.createDecryptedStream(filePath, {
+        key: file.encryptionKey,
+        iv: file.encryptionIV
+      });
+      
+      // Set headers for encrypted audio streaming (no range support)
+      const head = {
+        'Accept-Ranges': 'none', // Disable range requests for encrypted files
+        'Content-Type': mimeType,
+        ...securityHeaders
+      };
+      
+      res.writeHead(200, head);
+      
+      // Stream the decrypted content
+      decryptedStream.pipe(res);
+      
+      // Log the streaming access
+      console.log(`Encrypted file streamed: ${file.filename} by user ${userId}`);
+      return;
+      
+    } catch (decryptError) {
+      console.error('Decryption error:', decryptError);
+      return next(new ErrorResponse('Error decrypting file', 500));
+    }
+  }
+
+  // Handle unencrypted files (legacy support)
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
 
   if (range) {
     // Parse Range header

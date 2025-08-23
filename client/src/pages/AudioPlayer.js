@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
+import DRMPlayer from '../components/DRMPlayer';
 import {
   Container,
   Typography,
   Box,
-  Slider,
-  IconButton,
   Paper,
   Divider,
   List,
@@ -14,7 +13,6 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  Chip,
   CircularProgress,
   Button,
   TextField,
@@ -22,18 +20,13 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  IconButton,
 } from '@mui/material';
 import {
-  PlayArrow,
-  Pause,
-  SkipPrevious,
-  SkipNext,
   Add,
   Timer,
-  Edit,
   Delete,
 } from '@mui/icons-material';
-import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 
 const AudioPlayer = () => {
@@ -44,10 +37,6 @@ const AudioPlayer = () => {
   const [audioFile, setAudioFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.7);
   const [checkpoints, setCheckpoints] = useState([]);
   const [showAddCheckpoint, setShowAddCheckpoint] = useState(false);
   const [newCheckpoint, setNewCheckpoint] = useState({
@@ -55,9 +44,9 @@ const AudioPlayer = () => {
     description: '',
     timestamp: 0,
   });
+  const [drmEnabled, setDrmEnabled] = useState(true);
   
-  const audioRef = useRef(null);
-  const progressInterval = useRef(null);
+  // Refs no longer needed - DRM player handles audio internally
 
   // Format time in seconds to MM:SS
   const formatTime = (timeInSeconds) => {
@@ -78,7 +67,7 @@ const AudioPlayer = () => {
         
         setAudioFile(fileRes.data.data);
         setCheckpoints(checkpointsRes.data.data || []);
-        setDuration(fileRes.data.data.duration);
+        // Duration is now handled by DRM player
       } catch (err) {
         setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to load audio file');
         console.error('Error:', err);
@@ -90,181 +79,21 @@ const AudioPlayer = () => {
     fetchData();
 
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-      if (progressInterval.current) {
-        clearInterval(progressInterval.current);
-      }
+      // Cleanup is now handled by DRM player
     };
   }, [id]);
 
-  // Initialize audio element with token-based streaming
-  useEffect(() => {
-    if (!audioFile) return;
+  // Audio initialization handled by DRM player
 
-    let audio = null;
-    let tokenRefreshInterval = null;
-    let currentToken = '';
-
-    // Event handlers
-    const handleLoadedMetadata = () => {
-      setDuration(audio.duration);
-    };
-
-    const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
-    };
-
-    const handleEnded = () => {
-      setIsPlaying(false);
-      setCurrentTime(0);
-    };
-
-    const handleError = (e) => {
-      console.error('Audio playback error:', e);
-      setError('Error playing audio. Please try again.');
-    };
-
-    const initializeAudio = async () => {
-      try {
-        // Get a new stream token
-        const response = await api.get(`/files/stream-token/${id}`);
-        
-        currentToken = response.data.data.token;
-        
-        // Create a new audio element
-        audio = new Audio();
-        audio.preload = 'none';
-        audio.crossOrigin = 'anonymous';
-        
-        // Set up event listeners
-        audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-        audio.addEventListener('timeupdate', handleTimeUpdate);
-        audio.addEventListener('ended', handleEnded);
-        audio.addEventListener('error', handleError);
-        
-        // Set the source with the token
-        audio.src = `/api/v1/files/stream/${currentToken}`;
-        
-        // Set authentication headers
-        const token = localStorage.getItem('token');
-        if (token) {
-          audio.setAttribute('crossorigin', 'use-credentials');
-        }
-        
-        // Set up token refresh (every 4 minutes, tokens expire in 5)
-        tokenRefreshInterval = setInterval(async () => {
-          try {
-            const refreshResponse = await api.get(`/files/stream-token/${id}`);
-            currentToken = refreshResponse.data.data.token;
-            
-            // Only update the source if we're not currently playing to avoid interruptions
-            if (audio && !isPlaying) {
-              audio.src = `/api/v1/files/stream/${currentToken}`;
-            }
-          } catch (error) {
-            console.error('Error refreshing stream token:', error);
-          }
-        }, 4 * 60 * 1000); // 4 minutes
-        
-        return audio;
-      } catch (error) {
-        console.error('Error initializing audio stream:', error);
-        setError('Failed to initialize audio stream');
-        return null;
-      }
-    };
-    
-    // Initialize the audio
-    initializeAudio().then(initializedAudio => {
-      if (initializedAudio) {
-        audioRef.current = initializedAudio;
-      }
-    });
-    
-    // Cleanup function
-    return () => {
-      if (audio) {
-        audio.pause();
-        audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-        audio.removeEventListener('timeupdate', handleTimeUpdate);
-        audio.removeEventListener('ended', handleEnded);
-        audio.removeEventListener('error', handleError);
-        audio.src = '';
-      }
-      if (tokenRefreshInterval) {
-        clearInterval(tokenRefreshInterval);
-      }
-    };
-  }, [id, audioFile, isPlaying]);
-
-  // Handle play/pause
-  const togglePlayPause = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        // Add authentication token to the request headers
-        const token = localStorage.getItem('token');
-        if (token) {
-          // Set up fetch with credentials for the audio element
-          audioRef.current.setAttribute('crossorigin', 'use-credentials');
-          
-          // Play the audio
-          const playPromise = audioRef.current.play();
-          
-          // Handle any play promise errors
-          if (playPromise !== undefined) {
-            playPromise.catch(error => {
-              console.error('Playback failed:', error);
-              setError('Playback failed. Please check your authentication and try again.');
-              setIsPlaying(false);
-            });
-          } else {
-            setIsPlaying(true);
-          }
-        } else {
-          setError('Authentication required to play audio');
-        }
-      }
-    }
-  };
-
-  // Handle seek
-  const handleSeek = (event, newValue) => {
-    if (!audioRef.current) return;
-    
-    const seekTime = (newValue / 100) * duration;
-    audioRef.current.currentTime = seekTime;
-    setCurrentTime(seekTime);
-  };
-
-  // Handle volume change
-  const handleVolumeChange = (event, newValue) => {
-    const newVolume = newValue / 100;
-    setVolume(newVolume);
-    if (audioRef.current) {
-      audioRef.current.volume = newVolume;
-    }
-    
-    // Save volume preference to localStorage
-    localStorage.setItem('audioVolume', newValue);
+  // Handle DRM toggle (for admin users)
+  const toggleDRM = () => {
+    setDrmEnabled(!drmEnabled);
   };
 
   // Jump to checkpoint
   const jumpToCheckpoint = (timestamp) => {
-    if (!audioRef.current) return;
-    
-    audioRef.current.currentTime = timestamp;
-    setCurrentTime(timestamp);
-    
-    if (!isPlaying) {
-      audioRef.current.play();
-      setIsPlaying(true);
-    }
+    // Checkpoint jumping is now handled by DRM player
+    console.log('Jumping to checkpoint:', timestamp);
   };
 
   // Add new checkpoint
@@ -272,7 +101,7 @@ const AudioPlayer = () => {
     try {
       const res = await api.post('/checkpoints', {
         fileId: id,
-        timestamp: Math.floor(currentTime),
+        timestamp: Math.floor(0), // Will be updated when DRM player provides current time
         name: newCheckpoint.name,
         description: newCheckpoint.description,
       });
@@ -329,54 +158,14 @@ const AudioPlayer = () => {
           </Typography>
         )}
         
-        <Box sx={{ mt: 4, mb: 2 }}>
-          <Slider
-            value={(currentTime / duration) * 100 || 0}
-            onChange={handleSeek}
-            aria-labelledby="audio-progress"
-          />
-          <Box display="flex" justifyContent="space-between" mt={1}>
-            <Typography variant="caption">
-              {formatTime(currentTime)}
-            </Typography>
-            <Typography variant="caption">
-              {formatTime(duration)}
-            </Typography>
-          </Box>
-        </Box>
-        
-        <Box display="flex" justifyContent="center" alignItems="center" gap={2} mt={2}>
-          <IconButton size="large" disabled={!checkpoints.length}>
-            <SkipPrevious />
-          </IconButton>
-          
-          <IconButton
-            size="large"
-            color="primary"
-            onClick={togglePlayPause}
-            sx={{ width: 64, height: 64 }}
-          >
-            {isPlaying ? <Pause fontSize="large" /> : <PlayArrow fontSize="large" />}
-          </IconButton>
-          
-          <IconButton size="large" disabled={!checkpoints.length}>
-            <SkipNext />
-          </IconButton>
-        </Box>
-        
-        <Box sx={{ mt: 2 }}>
-          <Box display="flex" alignItems="center" gap={1}>
-            <Typography variant="body2" color="text.secondary">
-              Volume:
-            </Typography>
-            <Slider
-              value={volume * 100}
-              onChange={handleVolumeChange}
-              aria-labelledby="volume-slider"
-              sx={{ width: 100 }}
-            />
-          </Box>
-        </Box>
+        {/* DRM Audio Player */}
+        <DRMPlayer 
+          audioFile={audioFile}
+          drmEnabled={drmEnabled}
+          onTimeUpdate={(time) => {/* Time updates handled by DRM player */}}
+          onCheckpointJump={jumpToCheckpoint}
+          checkpoints={checkpoints}
+        />
       </Paper>
       
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
@@ -421,7 +210,7 @@ const AudioPlayer = () => {
                 >
                   <ListItemButton
                     onClick={() => jumpToCheckpoint(checkpoint.timestamp)}
-                    selected={Math.abs(currentTime - checkpoint.timestamp) < 1}
+                    selected={false} // Selection state will be handled by DRM player
                   >
                     <ListItemIcon>
                       <Timer />
@@ -475,20 +264,9 @@ const AudioPlayer = () => {
           />
           <Box mt={2}>
             <Typography variant="body2" color="text.secondary">
-              Timestamp: {formatTime(currentTime)}
+              Timestamp: {formatTime(0)}
             </Typography>
-            <Slider
-              value={(currentTime / duration) * 100 || 0}
-              onChange={(e, value) => {
-                const seekTime = (value / 100) * duration;
-                setCurrentTime(seekTime);
-                if (audioRef.current) {
-                  audioRef.current.currentTime = seekTime;
-                }
-              }}
-              aria-labelledby="checkpoint-timestamp-slider"
-              sx={{ mt: 2 }}
-            />
+            {/* Timestamp selection will be handled by DRM player */}
           </Box>
         </DialogContent>
         <DialogActions>

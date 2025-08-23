@@ -25,19 +25,23 @@ exports.getCheckpoints = asyncHandler(async (req, res, next) => {
     }
   });
 
-  if (!file && !file.isPublic) {
+  // Check file access (admins can access checkpoints for any file)
+  if (req.user.role !== 'admin') {
+    if (!file || (!file.isPublic && file.fileAccesses.length === 0)) {
+      return next(
+        new ErrorResponse('Not authorized to access checkpoints for this file', 403)
+      );
+    }
+  } else if (!file) {
     return next(
-      new ErrorResponse('Not authorized to access checkpoints for this file', 403)
+      new ErrorResponse('File not found', 404)
     );
   }
 
   const checkpoints = await prisma.checkpoint.findMany({
     where: {
       fileId: parseInt(req.params.fileId),
-      OR: [
-        { userId: req.user.id }, // User's own checkpoints
-        { isPublic: true }      // Public checkpoints
-      ]
+      userId: req.user.id // Only user's own checkpoints
     },
     orderBy: {
       timestamp: 'asc'
@@ -66,7 +70,7 @@ exports.getCheckpoint = asyncHandler(async (req, res, next) => {
   }
 
   // Check if user has access to this checkpoint
-  if (checkpoint.userId !== req.user.id && !checkpoint.isPublic) {
+  if (checkpoint.userId !== req.user.id) {
     return next(
       new ErrorResponse('Not authorized to access this checkpoint', 403)
     );
@@ -102,9 +106,16 @@ exports.createCheckpoint = asyncHandler(async (req, res, next) => {
     }
   });
 
-  if (!file && !file.isPublic) {
+  // Check file access (admins can create checkpoints for any file)
+  if (req.user.role !== 'admin') {
+    if (!file || (!file.isPublic && file.fileAccesses.length === 0)) {
+      return next(
+        new ErrorResponse('Not authorized to access this file', 403)
+      );
+    }
+  } else if (!file) {
     return next(
-      new ErrorResponse('Not authorized to add checkpoints to this file', 403)
+      new ErrorResponse('File not found', 404)
     );
   }
 

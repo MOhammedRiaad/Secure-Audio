@@ -17,6 +17,7 @@ import FileAccessManagement from './pages/admin/FileAccessManagement';
 import FileUpload from './pages/admin/FileUpload';
 import UserCreate from './pages/admin/UserCreate';
 import UserEdit from './pages/admin/UserEdit';
+import TestDRM from './pages/TestDRM';
 
 const theme = createTheme({
   palette: {
@@ -65,6 +66,9 @@ function App() {
             <Route path="/admin/files/new" element={<AdminRoute><FileUpload /></AdminRoute>} />
             <Route path="/admin/files/upload" element={<AdminRoute><FileUpload /></AdminRoute>} />
             <Route path="/admin/files/:fileId/access" element={<AdminRoute><FileAccessManagement /></AdminRoute>} />
+            
+            {/* Test Routes */}
+            <Route path="/test-drm" element={<PrivateRoute><TestDRM /></PrivateRoute>} />
             
             {/* Catch all other routes */}
             <Route path="*" element={<Navigate to="/" replace />} />

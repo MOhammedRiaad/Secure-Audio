@@ -20,6 +20,7 @@ require('dotenv').config();
 const authRoutes = require('./routes/auth');
 const audioFilesRoutes = require('./routes/audioFiles');
 const checkpointsRoutes = require('./routes/checkpoints');
+const drmStreamRoutes = require('./routes/drmStream');
 const adminUsersRoutes = require('./routes/admin/users');
 const adminFilesRoutes = require('./routes/admin/files');
 const adminFileAccessRoutes = require('./routes/admin/fileAccess');
@@ -125,6 +126,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/files', auth.protect, audioFilesRoutes);
 app.use('/api/v1/checkpoints', checkpointsRoutes);
+app.use('/api/v1/drm', drmStreamRoutes);
 
 // Admin routes (protected and admin only)
 app.use('/api/v1/admin/users', [auth.protect, auth.authorize('admin')], adminUsersRoutes);
