@@ -306,29 +306,54 @@ class AudioDRM {
   // Create decrypted stream for encrypted files
   createDecryptedStream(encryptedFilePath, options) {
     try {
-      const { key, iv } = options;
+      const { key } = options;
+      const { Transform } = require('stream');
       
-      // Read the encrypted file
-      const encryptedData = fs.readFileSync(encryptedFilePath);
+      // Create a transform stream for decryption
+      const decryptTransform = new Transform({
+        transform(chunk, encoding, callback) {
+          try {
+            // For the first chunk, extract the IV (first 16 bytes)
+            if (!this.ivExtracted) {
+              this.fileIV = chunk.slice(0, 16);
+              chunk = chunk.slice(16);
+              this.ivExtracted = true;
+              
+              // Initialize decipher with the IV from the file
+              this.decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(key, 'hex'), this.fileIV);
+              this.decipher.setAutoPadding(true);
+            }
+            
+            // Decrypt the chunk
+            if (chunk.length > 0) {
+              const decrypted = this.decipher.update(chunk);
+              callback(null, decrypted);
+            } else {
+              callback();
+            }
+            
+          } catch (error) {
+            callback(error);
+          }
+        },
+        
+        flush(callback) {
+          try {
+            if (this.decipher) {
+              const final = this.decipher.final();
+              callback(null, final);
+            } else {
+              callback();
+            }
+          } catch (error) {
+            callback(error);
+          }
+        }
+      });
       
-      // Extract IV and encrypted content
-      const fileIV = encryptedData.slice(0, 16);
-      const encrypted = encryptedData.slice(16);
-      
-      // Decrypt the file
-      const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(key, 'hex'), fileIV);
-      decipher.setAutoPadding(true);
-      
-      let decrypted = decipher.update(encrypted);
-      decrypted = Buffer.concat([decrypted, decipher.final()]);
-      
-      // Create a readable stream from the decrypted buffer
-      const { Readable } = require('stream');
-      const stream = new Readable();
-      stream.push(decrypted);
-      stream.push(null); // End the stream
-      
-      return stream;
+      // Create file read stream and pipe through decryption
+      const fileStream = fs.createReadStream(encryptedFilePath);
+      return fileStream.pipe(decryptTransform);
       
     } catch (error) {
       console.error('Decrypted stream creation error:', error);

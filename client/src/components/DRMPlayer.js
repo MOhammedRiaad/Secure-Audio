@@ -46,12 +46,11 @@ const DRMPlayer = ({ fileId, onError }) => {
         console.log('⏱️ Duration set:', sessionResponse.data.data.duration || 0);
         
         // Setup chunked audio streaming for enhanced security
-        if (audioRef.current) {
-          setupChunkedAudioStreaming(sessionResponse.data.data.sessionToken);
-        } else {
-          console.error('❌ Audio ref is null when trying to setup streaming');
-          setError('Audio player initialization failed');
-        }
+        // Note: We'll set up streaming in a separate useEffect when audioRef is ready
+        console.log('🎵 DRM session created successfully, streaming will be set up when audio element is ready');
+        
+        // Store the session token, streaming setup will happen in useEffect
+        // when audioRef.current becomes available
         
       } catch (error) {
         console.error('❌ DRM initialization failed:', error);
@@ -98,16 +97,29 @@ const DRMPlayer = ({ fileId, onError }) => {
     }
   }, [fileId, token, loading]);
 
+  // Setup streaming when sessionToken and audioRef are both available
+  useEffect(() => {
+    if (sessionToken && audioRef.current) {
+      console.log('🎵 Both sessionToken and audioRef are ready, setting up streaming...');
+      setupAudioStreaming(sessionToken);
+    } else {
+      console.log('⏳ Waiting for streaming setup:', {
+        hasSessionToken: !!sessionToken,
+        hasAudioRef: !!audioRef.current
+      });
+    }
+  }, [sessionToken]);
+
   // Setup DRM audio streaming
-  const setupChunkedAudioStreaming = async (sessionToken) => {
+  const setupAudioStreaming = async (sessionToken) => {
     try {
-      console.log('🔧 Setting up chunked audio streaming with session token:', sessionToken);
+      console.log('🔧 Setting up DRM audio streaming with session token:', sessionToken);
       
       // Use the DRM streaming endpoint with full backend URL
       const streamUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000/api/v1'}/drm/stream/${sessionToken}`;
       // Fix double /api/v1 in URL
       const correctedStreamUrl = streamUrl.replace('/api/v1/api/v1', '/api/v1');
-      console.log('🎵 Setting audio source URL:', streamUrl);
+      console.log('🎵 Setting audio source URL:', correctedStreamUrl);
       console.log('🔑 Session token for streaming:', sessionToken);
       
       if (audioRef.current) {
@@ -123,7 +135,7 @@ const DRMPlayer = ({ fileId, onError }) => {
         });
         
         audioRef.current.src = correctedStreamUrl;
-        audioRef.current.crossOrigin = 'anonymous'; // Changed from 'use-credentials'
+        audioRef.current.crossOrigin = 'use-credentials'; // Use credentials for auth
         
         console.log('🎵 Audio element after src set:', {
           src: audioRef.current.src,
@@ -137,12 +149,14 @@ const DRMPlayer = ({ fileId, onError }) => {
         
         // Wait a bit and check again
         setTimeout(() => {
-          console.log('🎵 Audio element after load():', {
-            src: audioRef.current.src,
-            readyState: audioRef.current.readyState,
-            networkState: audioRef.current.networkState,
-            error: audioRef.current.error
-          });
+          if (audioRef.current) {
+            console.log('🎵 Audio element after load():', {
+              src: audioRef.current.src,
+              readyState: audioRef.current.readyState,
+              networkState: audioRef.current.networkState,
+              error: audioRef.current.error
+            });
+          }
         }, 1000);
         
         // Add error handling for audio loading
