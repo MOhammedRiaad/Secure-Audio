@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 const ErrorResponse = require('../../utils/errorResponse');
 const asyncHandler = require('../../middleware/async');
+const bcrypt = require('bcryptjs');
 
 const prisma = new PrismaClient();
 
@@ -54,6 +55,113 @@ exports.getUser = asyncHandler(async (req, res, next) => {
       new ErrorResponse(`User not found with id of ${req.params.id}`, 404)
     );
   }
+
+  res.status(200).json({
+    success: true,
+    data: user,
+  });
+});
+
+// @desc    Create user
+// @route   POST /api/v1/admin/users
+// @access  Private/Admin
+exports.createUser = asyncHandler(async (req, res, next) => {
+  const { name, email, password, role } = req.body;
+
+  // Validate required fields
+  if (!name || !email || !password) {
+    return next(new ErrorResponse('Please provide name, email, and password', 400));
+  }
+
+  // Check if user already exists
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+  });
+
+  if (existingUser) {
+    return next(new ErrorResponse('User with this email already exists', 400));
+  }
+
+  // Hash password
+  const hashedPassword = await bcrypt.hash(password, 12);
+
+  // Create user
+  const user = await prisma.user.create({
+    data: {
+      name,
+      email,
+      password: hashedPassword,
+      role: role || 'user',
+      isAdmin: role === 'admin',
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isLocked: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  res.status(201).json({
+    success: true,
+    data: user,
+  });
+});
+
+// @desc    Update user
+// @route   PUT /api/v1/admin/users/:id
+// @access  Private/Admin
+exports.updateUser = asyncHandler(async (req, res, next) => {
+  const { name, email, role, isLocked } = req.body;
+  const userId = parseInt(req.params.id);
+
+  // Check if user exists
+  const existingUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!existingUser) {
+    return next(new ErrorResponse(`User not found with id of ${req.params.id}`, 404));
+  }
+
+  // Check if email is being changed and if it's already taken
+  if (email && email !== existingUser.email) {
+    const emailExists = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (emailExists) {
+      return next(new ErrorResponse('User with this email already exists', 400));
+    }
+  }
+
+  // Prepare update data
+  const updateData = {};
+  if (name !== undefined) updateData.name = name;
+  if (email !== undefined) updateData.email = email;
+  if (role !== undefined) {
+    updateData.role = role;
+    updateData.isAdmin = role === 'admin';
+  }
+  if (isLocked !== undefined) updateData.isLocked = isLocked;
+
+  // Update user
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: updateData,
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isLocked: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
 
   res.status(200).json({
     success: true,

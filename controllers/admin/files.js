@@ -187,7 +187,7 @@ exports.getFileStats = asyncHandler(async (req, res, next) => {
         id: true,
         title: true,
         filename: true,
-        mimetype: true,
+        mimeType: true,
         size: true,
         duration: true,
         createdAt: true,

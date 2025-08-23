@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
   Container,
@@ -20,14 +20,12 @@ import {
   DialogContentText,
   DialogActions,
   TextField,
-  MenuItem,
   Box,
   CircularProgress,
   Alert,
   Chip,
 } from '@mui/material';
 import {
-  Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Search as SearchIcon,
@@ -228,8 +226,8 @@ const UserManagement = () => {
                     <TableCell>{user.email}</TableCell>
                     <TableCell>
                       <Chip
-                        label={user.isAdmin ? 'Admin' : 'User'}
-                        color={user.isAdmin ? 'primary' : 'default'}
+                        label={user.role}
+                        color={user.role === 'admin' ? 'primary' : 'default'}
                         size="small"
                       />
                     </TableCell>

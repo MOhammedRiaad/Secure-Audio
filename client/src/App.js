@@ -14,6 +14,9 @@ import AdminDashboard from './pages/admin/Dashboard';
 import UserManagement from './pages/admin/UserManagement';
 import FileManagement from './pages/admin/FileManagement';
 import FileAccessManagement from './pages/admin/FileAccessManagement';
+import FileUpload from './pages/admin/FileUpload';
+import UserCreate from './pages/admin/UserCreate';
+import UserEdit from './pages/admin/UserEdit';
 
 const theme = createTheme({
   palette: {
@@ -56,7 +59,11 @@ function App() {
             {/* Admin Routes */}
             <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
             <Route path="/admin/users" element={<AdminRoute><UserManagement /></AdminRoute>} />
+            <Route path="/admin/users/new" element={<AdminRoute><UserCreate /></AdminRoute>} />
+            <Route path="/admin/users/edit/:id" element={<AdminRoute><UserEdit /></AdminRoute>} />
             <Route path="/admin/files" element={<AdminRoute><FileManagement /></AdminRoute>} />
+            <Route path="/admin/files/new" element={<AdminRoute><FileUpload /></AdminRoute>} />
+            <Route path="/admin/files/upload" element={<AdminRoute><FileUpload /></AdminRoute>} />
             <Route path="/admin/files/:fileId/access" element={<AdminRoute><FileAccessManagement /></AdminRoute>} />
             
             {/* Catch all other routes */}
