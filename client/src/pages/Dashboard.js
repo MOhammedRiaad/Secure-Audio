@@ -18,7 +18,7 @@ import {
   Button,
   Chip,
 } from '@mui/material';
-import { Search, MusicNote, Security } from '@mui/icons-material';
+import { Search, MusicNote, Security, Person, Logout } from '@mui/icons-material';
 import DeviceWarnings from '../components/DeviceWarnings';
 
 const Dashboard = () => {
@@ -27,7 +27,7 @@ const Dashboard = () => {
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
 
-  const { isAuthenticated, isAdmin } = useAuth();
+  const { isAuthenticated, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -94,6 +94,13 @@ const Dashboard = () => {
         <Box display="flex" gap={2}>
           <Button
             variant="outlined"
+            startIcon={<Person />}
+            onClick={() => navigate('/profile')}
+          >
+            Profile
+          </Button>
+          <Button
+            variant="outlined"
             startIcon={<Security />}
             onClick={() => navigate('/devices')}
           >
@@ -108,6 +115,17 @@ const Dashboard = () => {
               Upload New File
             </Button>
           )}
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<Logout />}
+            onClick={async () => {
+              await logout();
+              navigate('/login');
+            }}
+          >
+            Logout
+          </Button>
         </Box>
       </Box>
 

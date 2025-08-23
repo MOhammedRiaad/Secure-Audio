@@ -10,8 +10,10 @@ import {
   Paper, 
   Alert, 
   CircularProgress,
-  Link as MuiLink
+  Link as MuiLink,
+  Divider
 } from '@mui/material';
+import { AdminPanelSettings } from '@mui/icons-material';
 import DeviceWarnings from '../components/DeviceWarnings';
 
 const Login = () => {
@@ -22,7 +24,7 @@ const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   
-  const { login, isAuthenticated, deviceWarnings } = useAuth();
+  const { login, isAuthenticated, deviceWarnings, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -149,6 +151,23 @@ const Login = () => {
             >
               {loading ? <CircularProgress size={24} /> : 'Sign In'}
             </Button>
+            
+            {/* Admin Dashboard Button - shown after successful login for admin users */}
+            {isAuthenticated && isAdmin && (
+              <>
+                <Divider sx={{ my: 2 }} />
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  color="primary"
+                  startIcon={<AdminPanelSettings />}
+                  onClick={() => navigate('/admin')}
+                  sx={{ mb: 2 }}
+                >
+                  Go to Admin Dashboard
+                </Button>
+              </>
+            )}
             
             <Box sx={{ textAlign: 'center', mt: 2 }}>
               <MuiLink component={Link} to="/register" variant="body2">

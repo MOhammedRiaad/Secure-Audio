@@ -19,6 +19,7 @@ import UserCreate from './pages/admin/UserCreate';
 import UserEdit from './pages/admin/UserEdit';
 import TestDRM from './pages/TestDRM';
 import DeviceManagementPage from './pages/DeviceManagement';
+import UserProfile from './pages/UserProfile';
 
 const theme = createTheme({
   palette: {
@@ -58,6 +59,7 @@ function App() {
             <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
             <Route path="/player/:id" element={<PrivateRoute><AudioPlayer /></PrivateRoute>} />
             <Route path="/devices" element={<PrivateRoute><DeviceManagementPage /></PrivateRoute>} />
+            <Route path="/profile" element={<PrivateRoute><UserProfile /></PrivateRoute>} />
             
             {/* Admin Routes */}
             <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
