@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api';
 import {
   Container,
   Typography,
@@ -72,8 +72,8 @@ const AudioPlayer = () => {
       try {
         setLoading(true);
         const [fileRes, checkpointsRes] = await Promise.all([
-          axios.get(`/api/v1/files/${id}`),
-          axios.get(`/api/v1/checkpoints/file/${id}`)
+          api.get(`/files/${id}`),
+          api.get(`/checkpoints/file/${id}`)
         ]);
         
         setAudioFile(fileRes.data.data);
@@ -130,11 +130,7 @@ const AudioPlayer = () => {
     const initializeAudio = async () => {
       try {
         // Get a new stream token
-        const response = await axios.get(`/api/v1/files/stream-token/${id}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
+        const response = await api.get(`/files/stream-token/${id}`);
         
         currentToken = response.data.data.token;
         
@@ -161,11 +157,7 @@ const AudioPlayer = () => {
         // Set up token refresh (every 4 minutes, tokens expire in 5)
         tokenRefreshInterval = setInterval(async () => {
           try {
-            const refreshResponse = await axios.get(`/api/v1/files/stream-token/${id}`, {
-              headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`
-              }
-            });
+            const refreshResponse = await api.get(`/files/stream-token/${id}`);
             currentToken = refreshResponse.data.data.token;
             
             // Only update the source if we're not currently playing to avoid interruptions
@@ -278,7 +270,7 @@ const AudioPlayer = () => {
   // Add new checkpoint
   const handleAddCheckpoint = async () => {
     try {
-      const res = await axios.post('/api/v1/checkpoints', {
+      const res = await api.post('/checkpoints', {
         fileId: id,
         timestamp: Math.floor(currentTime),
         name: newCheckpoint.name,
@@ -297,7 +289,7 @@ const AudioPlayer = () => {
   const handleDeleteCheckpoint = async (checkpointId) => {
     if (window.confirm('Are you sure you want to delete this checkpoint?')) {
       try {
-        await axios.delete(`/api/v1/checkpoints/${checkpointId}`);
+        await api.delete(`/checkpoints/${checkpointId}`);
         setCheckpoints(checkpoints.filter(cp => cp.id !== checkpointId));
       } catch (err) {
         console.error('Error deleting checkpoint:', err);

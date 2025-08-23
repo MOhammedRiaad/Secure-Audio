@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../../api';
 import {
   Container,
   Typography,
@@ -136,7 +136,7 @@ const FileUpload = () => {
       if (metadata.year) formData.append('year', metadata.year);
       
       // Upload file with progress tracking
-      const response = await axios.post('/api/v1/files', formData, {
+      const response = await api.post('/files', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },

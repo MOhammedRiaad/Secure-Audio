@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../../api';
 import {
   Container,
   Typography,
@@ -60,7 +60,7 @@ const FileAccessManagement = () => {
     const fetchFileAccess = async () => {
       try {
         setLoading(true);
-        const res = await axios.get(`/api/v1/admin/file-access/file/${fileId}`);
+        const res = await api.get(`/admin/file-access/file/${fileId}`);
         setFile(res.data.data.file);
         setAllUsers(res.data.data.allUsers);
       } catch (err) {
@@ -86,7 +86,7 @@ const FileAccessManagement = () => {
       setError('');
       setSuccess('');
       
-      await axios.post('/api/v1/admin/file-access', {
+      await api.post('/admin/file-access', {
         userId: selectedUser,
         fileId: parseInt(fileId),
         expiresAt: expiresAt || null,
@@ -95,7 +95,7 @@ const FileAccessManagement = () => {
       setSuccess('Access granted successfully');
       
       // Refresh the file access data
-      const res = await axios.get(`/api/v1/admin/file-access/file/${fileId}`);
+      const res = await api.get(`/admin/file-access/file/${fileId}`);
       setFile(res.data.data.file);
       
       // Reset form
@@ -109,10 +109,10 @@ const FileAccessManagement = () => {
 
   const handleUpdateAccess = async (accessId, updates) => {
     try {
-      await axios.put(`/api/v1/admin/file-access/${accessId}`, updates);
+      await api.put(`/admin/file-access/${accessId}`, updates);
       
       // Refresh the file access data
-      const res = await axios.get(`/api/v1/admin/file-access/file/${fileId}`);
+      const res = await api.get(`/admin/file-access/file/${fileId}`);
       setFile(res.data.data.file);
       
       setSuccess('Access updated successfully');
@@ -134,10 +134,10 @@ const FileAccessManagement = () => {
       setDeleteLoading(true);
       setDeleteError('');
       
-      await axios.delete(`/api/v1/admin/file-access/${accessToDelete.id}`);
+      await api.delete(`/admin/file-access/${accessToDelete.id}`);
       
       // Refresh the file access data
-      const res = await axios.get(`/api/v1/admin/file-access/file/${fileId}`);
+      const res = await api.get(`/admin/file-access/file/${fileId}`);
       setFile(res.data.data.file);
       
       setSuccess('Access revoked successfully');

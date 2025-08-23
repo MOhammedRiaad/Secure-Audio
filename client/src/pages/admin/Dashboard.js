@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../../api';
 import {
   Container,
   Typography,
@@ -32,8 +32,8 @@ const AdminDashboard = () => {
         setLoading(true);
         // In a real app, you would fetch these stats from your API
         const [usersRes, filesRes] = await Promise.all([
-          axios.get('/api/v1/admin/users/count'),
-          axios.get('/api/v1/admin/files/stats'),
+          api.get('/admin/users/count'),
+          api.get('/admin/files/stats'),
         ]);
 
         setStats({
