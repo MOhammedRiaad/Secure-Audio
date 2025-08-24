@@ -12,6 +12,9 @@ const upload = require('../middleware/upload');
 const { imageUpload } = require('../middleware/imageUpload');
 const multer = require('multer');
 
+// Import chapter routes
+const audioChapterRoutes = require('./audioChapters');
+
 const router = express.Router();
 
 // Configure multer for multiple file uploads (audio + optional cover)
@@ -67,6 +70,9 @@ router.route('/:id')
 // Stream token and streaming routes
 router.get('/stream-token/:id', protect, generateStreamToken);
 router.get('/stream/:token', streamAudioFile);
+
+// Mount chapter routes
+router.use('/:fileId/chapters', audioChapterRoutes);
 
 // Cover image serving route
 router.get('/cover/:id', async (req, res) => {

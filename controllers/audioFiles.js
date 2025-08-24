@@ -59,6 +59,11 @@ exports.getAudioFiles = asyncHandler(async (req, res, next) => {
         orderBy: {
           timestamp: 'asc'
         }
+      },
+      chapters: {
+        orderBy: {
+          order: 'asc'
+        }
       }
     }
   });
@@ -83,6 +88,11 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
         },
         orderBy: {
           timestamp: 'asc'
+        }
+      },
+      chapters: {
+        orderBy: {
+          order: 'asc'
         }
       }
     }

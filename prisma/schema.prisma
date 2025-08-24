@@ -51,6 +51,7 @@ model AudioFile {
   updatedAt     DateTime     @updatedAt
   checkpoints   Checkpoint[]
   fileAccesses  FileAccess[]
+  chapters      AudioChapter[]
 }
 
 model FileAccess {
@@ -79,6 +80,19 @@ model Checkpoint {
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([fileId, timestamp, userId])
+}
+
+model AudioChapter {
+  id        Int       @id @default(autoincrement())
+  fileId    Int
+  label     String
+  startTime Float
+  endTime   Float?
+  order     Int
+  createdAt DateTime  @default(now())
+  audioFile AudioFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, order])
 }
 
 model ActiveSession {

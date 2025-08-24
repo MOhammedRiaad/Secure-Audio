@@ -3,7 +3,9 @@ const {
   generateDRMSession,
   streamDRMProtectedAudio,
   encryptAudioFile,
-  getDRMStatus
+  getDRMStatus,
+  streamSignedAudio,
+  generateSignedStreamUrl
 } = require('../controllers/drmStream');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -24,5 +26,11 @@ router.post('/encrypt/:id', protect, authorize('admin'), encryptAudioFile);
 
 // Get DRM protection status
 router.get('/status/:id', protect, getDRMStatus);
+
+// Generate signed URL for timestamp-based streaming
+router.post('/signed-url/:id', protect, generateSignedStreamUrl);
+
+
+router.get('/audio/:id/stream-signed', protect, streamSignedAudio);
 
 module.exports = router;

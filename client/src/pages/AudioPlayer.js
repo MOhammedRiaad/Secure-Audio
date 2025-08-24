@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
 import DRMPlayer from '../components/DRMPlayer';
@@ -29,6 +29,8 @@ import {
   Add,
   Timer,
   Delete,
+  PlayArrow,
+  MenuBook,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -41,6 +43,7 @@ const AudioPlayer = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [checkpoints, setCheckpoints] = useState([]);
+  const [chapters, setChapters] = useState([]);
   const [showAddCheckpoint, setShowAddCheckpoint] = useState(false);
   const [newCheckpoint, setNewCheckpoint] = useState({
     name: '',
@@ -49,7 +52,8 @@ const AudioPlayer = () => {
   });
   const [drmEnabled, setDrmEnabled] = useState(true);
   
-  // Refs no longer needed - DRM player handles audio internally
+  // Ref for DRM player to control playback
+  const drmPlayerRef = useRef(null);
 
   // Format time in seconds to MM:SS
   const formatTime = (timeInSeconds) => {
@@ -70,6 +74,7 @@ const AudioPlayer = () => {
         
         setAudioFile(fileRes.data.data);
         setCheckpoints(checkpointsRes.data.data || []);
+        setChapters(fileRes.data.data.chapters || []);
         // Duration is now handled by DRM player
       } catch (err) {
         setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to load audio file');
@@ -86,6 +91,15 @@ const AudioPlayer = () => {
     };
   }, [id]);
 
+  // Debug: Log chapter data when it changes
+  useEffect(() => {
+    if (chapters && chapters.length > 0) {
+      console.log('📖 Chapters loaded:', chapters.map(ch => ({ label: ch.label, startTime: ch.startTime, type: typeof ch.startTime })));
+    }
+  }, [chapters]);
+
+
+
   // Audio initialization handled by DRM player
 
   // Handle DRM toggle (for admin users)
@@ -93,17 +107,22 @@ const AudioPlayer = () => {
     setDrmEnabled(!drmEnabled);
   };
 
-  // Jump to checkpoint
+  // Jump to checkpoint or chapter
   const jumpToCheckpoint = (timestamp) => {
-    // Checkpoint jumping is now handled by DRM player
-    console.log('Jumping to checkpoint:', timestamp);
+    console.log('🎯 jumpToCheckpoint called with timestamp:', timestamp, 'type:', typeof timestamp);
+    if (drmPlayerRef.current) {
+      console.log('📱 DRM player ref exists, calling seekTo');
+      drmPlayerRef.current.seekTo(timestamp);
+    } else {
+      console.error('❌ DRM player ref is null');
+    }
   };
 
   // Add new checkpoint
   const handleAddCheckpoint = async () => {
     try {
       const res = await api.post('/checkpoints', {
-        fileId: id,
+        fileId: parseInt(id),
         timestamp: Math.floor(0), // Will be updated when DRM player provides current time
         name: newCheckpoint.name,
         description: newCheckpoint.description,
@@ -185,12 +204,54 @@ const AudioPlayer = () => {
             
             {/* DRM Audio Player */}
             <DRMPlayer 
+              ref={drmPlayerRef}
               fileId={parseInt(id)}
               onError={(error) => setError(error)}
             />
           </Grid>
         </Grid>
       </Paper>
+      
+      {/* Chapters Section */}
+      {chapters && chapters.length > 0 && (
+        <>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+            <Typography variant="h6">Chapters</Typography>
+          </Box>
+          
+          <Paper variant="outlined" sx={{ mb: 3 }}>
+            <List disablePadding>
+              {chapters.map((chapter, index) => (
+                <React.Fragment key={chapter.id}>
+                  <ListItem disablePadding>
+                    <ListItemButton
+                      onClick={() => jumpToCheckpoint(chapter.startTime)}
+                    >
+                      <ListItemIcon>
+                        <MenuBook />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={chapter.label}
+                        secondary={formatTime(chapter.startTime)}
+                      />
+                      <PlayArrow sx={{ ml: 1, color: 'primary.main' }} />
+                    </ListItemButton>
+                  </ListItem>
+                  {index < chapters.length - 1 && <Divider component="li" />}
+                </React.Fragment>
+              ))}
+            </List>
+          </Paper>
+        </>
+      )}
+      
+      {chapters && chapters.length === 0 && (
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Typography variant="body2" color="text.secondary">
+            No chapters available for this audio file.
+          </Typography>
+        </Paper>
+      )}
       
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
         <Typography variant="h6">Checkpoints</Typography>
