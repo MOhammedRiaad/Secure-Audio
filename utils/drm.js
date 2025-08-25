@@ -360,6 +360,62 @@ class AudioDRM {
       throw new Error('Failed to create decrypted stream');
     }
   }
+
+  // Create decrypted stream with FFmpeg-based seeking for encrypted files
+  async createDecryptedStreamWithSeek(encryptedFilePath, options) {
+    try {
+      const { key, startTime = 0 } = options;
+      const { spawn } = require('child_process');
+      
+      if (startTime === 0) {
+        // No seeking needed, use existing method
+        return this.createDecryptedStream(encryptedFilePath, options);
+      }
+      
+      console.log(`🔐 Creating FFmpeg-based seek stream for encrypted file at ${startTime}s`);
+      
+      // Get the absolute path to FFmpeg executable
+      const ffmpegPath = path.join(__dirname, '..', 'ffmpeg-8.0-essentials_build', 'bin', 'ffmpeg.exe');
+      
+      // Use FFmpeg to decrypt and seek in one operation
+      const ffmpeg = spawn(ffmpegPath, [
+        '-f', 'mp3',           // Input format
+        '-i', 'pipe:0',        // Read decrypted data from stdin
+        '-ss', startTime.toString(), // Seek to start time
+        '-c', 'copy',          // Copy without re-encoding when possible
+        '-f', 'mp3',           // Output format
+        '-avoid_negative_ts', 'make_zero', // Handle timestamp issues
+        'pipe:1'               // Output to stdout
+      ], {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+      
+      // Handle FFmpeg errors
+      ffmpeg.stderr.on('data', (data) => {
+        console.log('FFmpeg stderr:', data.toString());
+      });
+      
+      ffmpeg.on('error', (error) => {
+        console.error('FFmpeg process error:', error);
+      });
+      
+      // Create decryption stream and pipe to ffmpeg
+      const decryptStream = this.createDecryptedStream(encryptedFilePath, options);
+      decryptStream.pipe(ffmpeg.stdin);
+      
+      // Handle decryption stream errors
+      decryptStream.on('error', (error) => {
+        console.error('Decryption stream error:', error);
+        ffmpeg.kill();
+      });
+      
+      return ffmpeg.stdout;
+      
+    } catch (error) {
+      console.error('FFmpeg decrypted stream creation error:', error);
+      throw new Error('Failed to create FFmpeg decrypted stream with seek');
+    }
+  }
 }
 
 module.exports = AudioDRM;

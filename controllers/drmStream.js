@@ -164,10 +164,19 @@ exports.streamDRMProtectedAudio = asyncHandler(async (req, res, next) => {
 exports.streamSignedAudio = asyncHandler(async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { start = "0", end = "-1", expires, sig } = req.query;
+    const { start = "0", end = "-1", expires, sig, token } = req.query;
     
-    if (!expires || !sig) {
-      return res.status(400).json({ error: "missing signed parameters" });
+    if (!expires || !sig || !token) {
+      return res.status(400).json({ error: "missing signed parameters or authentication token" });
+    }
+    
+    // Verify JWT token for user authentication
+    let userId;
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      userId = decoded.id;
+    } catch (jwtError) {
+      return res.status(401).json({ error: "invalid or expired authentication token" });
     }
     
     const now = Date.now();
@@ -177,9 +186,25 @@ exports.streamSignedAudio = asyncHandler(async (req, res, next) => {
     }
     
     const meta = await prisma.audioFile.findUnique({
-      where: { id: parseInt(id) }
+      where: { id: parseInt(id) },
+      include: {
+        fileAccesses: {
+          where: { userId: userId }
+        }
+      }
     });
     if (!meta) return res.status(404).json({ error: "not found" });
+    
+    // Check access permissions (admin bypass)
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const isAdmin = user && user.role === 'admin';
+    
+    if (!isAdmin) {
+      const hasAccess = meta.fileAccesses.length > 0 || meta.isPublic;
+      if (!hasAccess) {
+        return res.status(403).json({ error: "not authorized to access this file" });
+      }
+    }
     
     // Verify signature (IP bound)
     const s = String(start);
@@ -249,66 +274,81 @@ exports.streamSignedAudio = asyncHandler(async (req, res, next) => {
     // Handle encrypted files with time-based seeking
     if (meta.isEncrypted && meta.encryptionKey && meta.encryptionIV) {
       try {
-        if (duration > 0 && parseFloat(s) > 0) {
-          console.log('🔓 Creating decrypted stream and seeking to timestamp:', s);
-          
-          // Create decrypted stream for the encrypted file
-          const decryptedStream = drm.createDecryptedStream(filePath, {
-            key: meta.encryptionKey
+        console.log('🔓 Processing encrypted file with time-based parameters:', { startTime: parseFloat(s), endTime: parseFloat(e) });
+        
+        // For encrypted files, we need to decrypt and then apply byte range
+        // Use FFmpeg-based seeking for encrypted files
+        const startTime = parseFloat(s);
+        const endTime = e === "-1" ? duration : parseFloat(e);
+        
+        console.log(`🔐 Processing encrypted file with server-side seek to: ${startTime}s`);
+        
+        try {
+          // Use FFmpeg-based seeking for encrypted files
+          const seekedStream = await drm.createDecryptedStreamWithSeek(filePath, {
+            key: meta.encryptionKey,
+            startTime: startTime
           });
           
-          // For time-based seeking with encrypted files, we'll stream the entire decrypted content
-          // This is a simplified approach - in production, you'd want more sophisticated seeking
-          const startTime = parseFloat(s);
-          const endTime = e === "-1" ? duration : parseFloat(e);
+          // Set headers to indicate successful seek
+          res.setHeader('Content-Type', meta.contentType || 'audio/mpeg');
+          res.setHeader('X-Seek-Applied', 'true');
+          res.setHeader('X-Start-Time', startTime.toString());
+          res.setHeader('Accept-Ranges', 'none'); // FFmpeg streams don't support ranges
           
-          console.log(`📍 Streaming decrypted file from ${startTime}s to ${endTime > 0 ? endTime + 's' : 'end'}`);
-          
-          // Set appropriate headers for audio streaming
-          res.setHeader('Content-Type', 'audio/mpeg');
-          res.setHeader('Accept-Ranges', 'bytes');
+          // Set CORS headers
           res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
           res.setHeader('Access-Control-Allow-Credentials', 'true');
           res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
           res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
           res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization');
-          res.setHeader('Access-Control-Expose-Headers', 'X-Start-Time, Content-Range, Accept-Ranges');
-          // Add X-Start-Time header to communicate the start time to the client
-          res.setHeader('X-Start-Time', startTime.toString());
+          res.setHeader('Access-Control-Expose-Headers', 'X-Start-Time, X-Seek-Applied, Content-Range, Accept-Ranges');
           
-          // Stream the decrypted audio
+          // Stream the seeked content
+          seekedStream.pipe(res);
+          
+          seekedStream.on('error', (error) => {
+            console.error('FFmpeg seek stream error:', error);
+            if (!res.headersSent) {
+              res.status(500).json({ error: 'Seek operation failed' });
+            }
+          });
+          
+          console.log(`✅ Encrypted signed stream with FFmpeg seek: ${meta.filename} (${startTime}s-${endTime}s)`);
+          return;
+          
+        } catch (error) {
+          console.error('FFmpeg seeking failed, falling back to regular stream:', error);
+          
+          // Fallback to regular decrypted stream without seeking
+          const decryptedStream = drm.createDecryptedStream(filePath, {
+            key: meta.encryptionKey
+          });
+          
+          // Set fallback headers
+          res.setHeader('Content-Type', meta.contentType || 'audio/mpeg');
+          res.setHeader('X-Seek-Applied', 'false');
+          res.setHeader('X-Start-Time', '0');
+          res.setHeader('Accept-Ranges', 'none');
+          
+          // Set CORS headers
+          res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
+          res.setHeader('Access-Control-Allow-Credentials', 'true');
+          res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization');
+          res.setHeader('Access-Control-Expose-Headers', 'X-Start-Time, X-Seek-Applied, Content-Range, Accept-Ranges');
+          
           decryptedStream.pipe(res);
           
           decryptedStream.on('error', (error) => {
-            console.error('Decrypted stream error:', error);
+            console.error('Fallback decrypted stream error:', error);
             if (!res.headersSent) {
               res.status(500).json({ error: 'Decryption streaming failed' });
             }
           });
           
-          return;
-        } else {
-          // For byte-based requests or start from beginning, use normal range handling
-          const decryptedStream = drm.createDecryptedStream(filePath, {
-            key: meta.encryptionKey
-          });
-          
-          setRangeHeaders(res, {
-            status: a === 0 && b === fileSize - 1 ? 200 : 206,
-            start: a,
-            end: b,
-            fileSize,
-            contentType: meta.contentType || 'audio/mpeg',
-          });
-          
-          res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
-          res.setHeader('Access-Control-Allow-Credentials', 'true');
-          res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-          res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-          res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
-          
-          decryptedStream.pipe(res);
-          console.log(`Encrypted signed stream: ${meta.filename} (${a}-${b})`);
+          console.log(`⚠️ Fallback encrypted signed stream: ${meta.filename} (no seek applied)`);
           return;
         }
         
@@ -332,6 +372,12 @@ exports.streamSignedAudio = asyncHandler(async (req, res, next) => {
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
+    
+    // Add X-Start-Time header for unencrypted files too
+    const startTime = parseFloat(s);
+    if (startTime > 0) {
+      res.setHeader('X-Start-Time', startTime.toString());
+    }
     
     const fileStream = fs.createReadStream(filePath, { start: a, end: b });
     fileStream.pipe(res);
@@ -410,11 +456,21 @@ exports.generateSignedStreamUrl = asyncHandler(async (req, res, next) => {
   });
   
   const { generateSignedStreamUrl } = require('../utils/signedUrl');
+  
+  // Get user's JWT token from request headers
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+  
+  if (!token) {
+    return next(new ErrorResponse('Authentication token required', 401));
+  }
+  
   const signedUrl = generateSignedStreamUrl(fileId, {
     start,
     end,
     expiresIn,
-    ip: req.ip
+    ip: req.ip,
+    token // Include the JWT token in the signed URL
   });
   
   res.status(200).json({

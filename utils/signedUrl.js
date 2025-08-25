@@ -19,7 +19,8 @@ const generateSignedStreamUrl = (fileId, options = {}) => {
     start = '0',
     end = '-1',
     expiresIn = 30 * 60 * 1000, // 30 minutes default
-    ip = '127.0.0.1'
+    ip = '127.0.0.1',
+    token = null
   } = options;
   
   const expires = Date.now() + expiresIn;
@@ -32,7 +33,14 @@ const generateSignedStreamUrl = (fileId, options = {}) => {
   });
   
   const baseUrl = process.env.API_BASE_URL || 'http://localhost:5000/api/v1';
-  return `${baseUrl}/drm/audio/${fileId}/stream-signed?start=${start}&end=${end}&expires=${expires}&sig=${signature}`;
+  let url = `${baseUrl}/drm/audio/${fileId}/stream-signed?start=${start}&end=${end}&expires=${expires}&sig=${signature}`;
+  
+  // Add token parameter if provided
+  if (token) {
+    url += `&token=${encodeURIComponent(token)}`;
+  }
+  
+  return url;
 };
 
 // Convert time in seconds to byte offset (approximate)
