@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 
@@ -18,7 +18,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
   const { token, loading } = useAuth();
   
   // Initialize DRM only when needed for regular playback
-  const initializeDRM = async () => {
+  const initializeDRM = useCallback(async () => {
     if (!fileId || !token) {
       return;
     }
@@ -58,7 +58,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [fileId, token, setIsLoading, setError, setDrmStatus, setSessionToken, setDuration, onError]);
   
   // Initialize DRM when component mounts with valid fileId and token
   useEffect(() => {
@@ -110,7 +110,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       document.removeEventListener('selectstart', handleSelectStart);
       document.removeEventListener('dragstart', handleDragStart);
     };
-  }, [fileId, token, loading, usingSignedUrl]);
+  }, [fileId, token, loading, usingSignedUrl, initializeDRM, sessionToken]);
 
   // Setup streaming when sessionToken and audioRef are both available
   useEffect(() => {
@@ -132,15 +132,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         
         // Add error handling for audio loading
         audioRef.current.addEventListener('error', (e) => {
-          if (audioRef.current.error) {
-            const errorCode = audioRef.current.error.code;
-            const errorMessages = {
-              1: 'MEDIA_ERR_ABORTED - The user aborted the loading process',
-              2: 'MEDIA_ERR_NETWORK - A network error occurred while loading',
-              3: 'MEDIA_ERR_DECODE - An error occurred while decoding the media',
-              4: 'MEDIA_ERR_SRC_NOT_SUPPORTED - The media format is not supported'
-            };
-          }
           setError(`Audio loading failed: ${audioRef.current.error?.message || 'Unknown error'}`);
         });
         
@@ -262,11 +253,13 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
          console.log('DRM: Secure stream loading initiated');
        });
        
-       // Prevent save/download through browser menu and monitor source
+        // Prevent save/download through browser menu and monitor source
         audio.addEventListener('progress', () => {
+          // Get the real URL from the attribute since src property is obfuscated
+          const realUrl = audio.getAttribute('src') || '';
           // Continuously monitor for unauthorized access attempts
-          if (audio.src && !audio.src.includes('/drm/stream/') && !audio.src.includes('blob:')) {
-            console.warn('DRM: Unauthorized source detected');
+          if (realUrl && !realUrl.includes('/drm/stream/') && !realUrl.includes('/stream-signed') && !realUrl.includes('blob:')) {
+            console.warn('DRM: Unauthorized source detected', 'URL:', realUrl);
           }
         });
         
@@ -308,8 +301,58 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
     }
   };
 
+  // Regular seeking method (fallback)
+  const seekToRegular = useCallback(async (timeInSeconds) => {
+    if (!sessionToken) {
+      setUsingSignedUrl(false);
+      await initializeDRM();
+      return;
+    }
+    
+    console.log(`DRM: Using regular seek to ${timeInSeconds} seconds`);
+    const actualDuration = duration || (audioRef.current ? audioRef.current.duration : 0);
+    
+    if (audioRef.current && actualDuration > 0) {
+      const clampedTime = Math.max(0, Math.min(timeInSeconds, actualDuration));
+      
+      if (audioRef.current.readyState >= 2) {
+        console.log(`DRM: Audio ready, setting currentTime to ${clampedTime}`);
+        audioRef.current.currentTime = clampedTime;
+        setCurrentTime(clampedTime);
+        
+        if (audioRef.current.paused) {
+          audioRef.current.play().then(() => {
+            setIsPlaying(true);
+            console.log(`DRM: Playback started at ${audioRef.current.currentTime} seconds`);
+          }).catch(err => {
+            console.error('Playback failed:', err);
+          });
+        }
+      } else {
+        console.log(`DRM: Audio not ready, waiting for loadeddata event`);
+        const handleLoadedData = () => {
+          console.log(`DRM: loadeddata event fired, setting currentTime to ${clampedTime}`);
+          audioRef.current.currentTime = clampedTime;
+          setCurrentTime(clampedTime);
+          
+          if (audioRef.current.paused) {
+            audioRef.current.play().then(() => {
+              setIsPlaying(true);
+              console.log(`DRM: Playback started at ${audioRef.current.currentTime} seconds`);
+            }).catch(err => {
+              console.error('Playback failed:', err);
+            });
+          }
+          
+          audioRef.current.removeEventListener('loadeddata', handleLoadedData);
+        };
+        audioRef.current.addEventListener('loadeddata', handleLoadedData);
+      }
+    }
+  }, [sessionToken, duration, setUsingSignedUrl, initializeDRM, setCurrentTime, setIsPlaying]);
+
   // Seek using signed URL for more accurate timestamp-based streaming
-  const seekToWithSignedUrl = async (timeInSeconds) => {
+  const seekToWithSignedUrl = useCallback(async (timeInSeconds) => {
     try {
       setUsingSignedUrl(true);
       
@@ -320,79 +363,44 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       });
       
       const { signedUrl } = response.data.data;
+      console.log(`DRM: Seeking to ${timeInSeconds} seconds with signed URL`);
       
       if (audioRef.current) {
         audioRef.current.src = signedUrl;
         audioRef.current.load();
         
-        const handleCanPlay = () => {
-          audioRef.current.currentTime = 0;
-          setCurrentTime(timeInSeconds);
+        const handleCanPlayThrough = () => {
+          // The backend provides a pre-seeked stream, so we don't need to manually set currentTime
+          console.log(`DRM: Audio canplaythrough event fired, readyState: ${audioRef.current.readyState}, duration: ${audioRef.current.duration}`);
+          console.log(`DRM: Stream currentTime is ${audioRef.current.currentTime} (backend pre-seeked)`);
           
+          // Update our state to reflect the backend-provided position
+          setCurrentTime(audioRef.current.currentTime);
+          
+          // Start playback directly - the stream is already at the correct position
           audioRef.current.play().then(() => {
             setIsPlaying(true);
+            console.log(`DRM: Playback started at ${audioRef.current.currentTime} seconds (pre-seeked by backend)`);
           }).catch(err => {
-            // Playback failed
+            console.error('Playback failed:', err);
           });
           
-          audioRef.current.removeEventListener('canplay', handleCanPlay);
+          audioRef.current.removeEventListener('canplaythrough', handleCanPlayThrough);
         };
         
-        audioRef.current.addEventListener('canplay', handleCanPlay);
+        audioRef.current.addEventListener('canplaythrough', handleCanPlayThrough);
       }
     } catch (error) {
+      console.error('Error with signed URL seeking:', error);
       setUsingSignedUrl(false);
       seekToRegular(timeInSeconds);
     }
-  };
-  
-  // Regular seeking method (fallback)
-  const seekToRegular = async (timeInSeconds) => {
-    if (!sessionToken) {
-      setUsingSignedUrl(false);
-      await initializeDRM();
-      return;
-    }
-    
-    const actualDuration = duration || (audioRef.current ? audioRef.current.duration : 0);
-    
-    if (audioRef.current && actualDuration > 0) {
-      const clampedTime = Math.max(0, Math.min(timeInSeconds, actualDuration));
-      
-      if (audioRef.current.readyState >= 2) {
-        audioRef.current.currentTime = clampedTime;
-        setCurrentTime(clampedTime);
-        
-        if (audioRef.current.paused) {
-          audioRef.current.play().then(() => {
-            setIsPlaying(true);
-          }).catch(err => {
-            // Playback failed
-          });
-        }
-      } else {
-        const handleLoadedData = () => {
-          audioRef.current.currentTime = clampedTime;
-          setCurrentTime(clampedTime);
-          
-          if (audioRef.current.paused) {
-            audioRef.current.play().then(() => {
-              setIsPlaying(true);
-            }).catch(err => {
-              // Playback failed
-            });
-          }
-          
-          audioRef.current.removeEventListener('loadeddata', handleLoadedData);
-        };
-        audioRef.current.addEventListener('loadeddata', handleLoadedData);
-      }
-    }
-  };
+  }, [fileId, setUsingSignedUrl, setCurrentTime, setIsPlaying, seekToRegular]);
 
   // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     seekTo: (timeInSeconds) => {
+      console.log(`DRM: seekTo called with time ${timeInSeconds}`);
       seekToWithSignedUrl(timeInSeconds);
     },
     seekToRegular: seekToRegular,
@@ -402,7 +410,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
     play: () => audioRef.current?.play(),
     pause: () => audioRef.current?.pause(),
     getAudioElement: () => audioRef.current
-  }), [currentTime, duration, isPlaying]);
+  }), [currentTime, duration, isPlaying, seekToRegular, seekToWithSignedUrl]);
   
 
   

@@ -271,7 +271,10 @@ exports.streamSignedAudio = asyncHandler(async (req, res, next) => {
           res.setHeader('Access-Control-Allow-Credentials', 'true');
           res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
           res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-          res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
+          res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization');
+          res.setHeader('Access-Control-Expose-Headers', 'X-Start-Time, Content-Range, Accept-Ranges');
+          // Add X-Start-Time header to communicate the start time to the client
+          res.setHeader('X-Start-Time', startTime.toString());
           
           // Stream the decrypted audio
           decryptedStream.pipe(res);

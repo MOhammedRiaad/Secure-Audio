@@ -31,6 +31,6 @@ router.get('/status/:id', protect, getDRMStatus);
 router.post('/signed-url/:id', protect, generateSignedStreamUrl);
 
 
-router.get('/audio/:id/stream-signed', protect, streamSignedAudio);
+router.get('/audio/:id/stream-signed', streamSignedAudio);
 
 module.exports = router;
