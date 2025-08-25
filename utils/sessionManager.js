@@ -22,10 +22,10 @@ class SessionManager {
       // Get device information
       const deviceSession = DeviceFingerprint.createDeviceSession(req, additionalData);
       
-      // Get user's max devices limit
+      // Get user's max devices limit and device approval status
       const user = await prisma.user.findUnique({
         where: { id: userId },
-        select: { maxDevices: true, isLocked: true }
+        select: { maxDevices: true, isLocked: true, deviceApprovalRequired: true }
       });
       
       if (!user) {
@@ -75,6 +75,11 @@ class SessionManager {
           expiresAt: { gt: new Date() }
         }
       });
+      
+      // If user requires device approval and has active sessions, prevent new device login
+      if (user.deviceApprovalRequired && activeSessions.length > 0) {
+        throw new Error('Device approval required - user has existing active sessions');
+      }
       
       // If user has reached max devices limit, handle device limit
       if (activeSessions.length >= user.maxDevices) {

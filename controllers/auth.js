@@ -100,7 +100,7 @@ exports.register = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/auth/login
 // @access  Public
 exports.login = asyncHandler(async (req, res, next) => {
-  const { email, password } = req.body;
+  const { email, password, deviceApproved } = req.body;
 
   // Validate input
   if (!email || !password) {
@@ -124,7 +124,10 @@ exports.login = asyncHandler(async (req, res, next) => {
         role: true,
         isAdmin: true,
         loginAttempts: true,
-        lockUntil: true
+        lockUntil: true,
+        isLocked: true,
+        deviceApprovalRequired: true,
+        maxDevices: true
       }
     });
 
@@ -139,6 +142,15 @@ exports.login = asyncHandler(async (req, res, next) => {
       );
     }
 
+    // Check if account is permanently locked
+    if (user?.isLocked) {
+      return next(
+        ErrorResponse.forbidden(
+          'Account has been locked due to multiple device login attempts. Please contact support.'
+        )
+      );
+    }
+
     // Check if user exists and password is correct
     if (!user || !(await bcrypt.compare(password, user.password))) {
       // Increment failed login attempts if user exists
@@ -147,6 +159,70 @@ exports.login = asyncHandler(async (req, res, next) => {
       }
       
       return next(ErrorResponse.unauthorized('Invalid email or password'));
+    }
+
+    // Check for existing active sessions if user requires device approval
+    if (user.deviceApprovalRequired) {
+      const activeSessions = await prisma.activeSession.findMany({
+        where: {
+          userId: user.id,
+          isActive: true,
+          expiresAt: { gt: new Date() }
+        }
+      });
+
+      // If user has active sessions and hasn't approved this device
+      if (activeSessions.length > 0 && !deviceApproved) {
+        return res.status(200).json({
+          success: false,
+          requiresDeviceApproval: true,
+          message: 'Device approval required. This application only allows login from one device at a time.'
+        });
+      }
+
+      // If user has active sessions and tries to login from another device
+      if (activeSessions.length > 0 && deviceApproved) {
+         // validate if same device first
+         const sameDevice = activeSessions.find(session => session.deviceId == req.body.deviceData.deviceId);
+         if (!sameDevice) {
+          // Lock the account
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              isLocked: true,
+              lockUntil: null // Permanent lock
+            }
+          });
+          
+        // Deactivate all existing sessions
+        await prisma.activeSession.updateMany({
+          where: {
+            userId: user.id,
+            isActive: true
+          },
+          data: {
+            isActive: false
+          }
+        });
+
+        return next(
+            ErrorResponse.forbidden(
+              'Account has been locked due to attempted login from multiple devices. Please contact support.'
+            )
+          );
+         }
+
+      }
+
+      // If user approved device usage, disable future approval requirements
+      if (deviceApproved) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            deviceApprovalRequired: false
+          }
+        });
+      }
     }
 
     // Reset login attempts on successful login

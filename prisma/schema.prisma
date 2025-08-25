@@ -15,6 +15,7 @@ model User {
   role             Role            @default(user)
   isAdmin          Boolean         @default(false)
   isLocked         Boolean         @default(false) @map("is_locked")
+  deviceApprovalRequired Boolean   @default(true) @map("device_approval_required")
   createdAt        DateTime        @default(now()) @map("created_at")
   lastLogin        DateTime?       @map("last_login")
   lockUntil        DateTime?       @map("lock_until")

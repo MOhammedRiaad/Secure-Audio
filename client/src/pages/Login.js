@@ -15,6 +15,7 @@ import {
 } from '@mui/material';
 import { AdminPanelSettings } from '@mui/icons-material';
 import DeviceWarnings from '../components/DeviceWarnings';
+import DeviceApprovalModal from '../components/DeviceApprovalModal';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -24,7 +25,15 @@ const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   
-  const { login, isAuthenticated, deviceWarnings, isAdmin } = useAuth();
+  const { 
+    login, 
+    isAuthenticated, 
+    deviceWarnings, 
+    isAdmin, 
+    showDeviceApproval, 
+    handleDeviceApproval, 
+    cancelDeviceApproval 
+  } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -63,13 +72,17 @@ const Login = () => {
     
     try {
       setLoading(true);
-      const { success, error } = await login(email, password);
+      const result = await login(email, password);
       
-      if (success) {
+      if (result.success) {
         console.log('Login successful, redirecting...');
         // Force a refresh to ensure the token is picked up by the API client
         window.location.href = from;
+      } else if (result.requiresDeviceApproval) {
+        // Device approval is required, modal will be shown automatically
+        setError('');
       } else {
+        const { error } = result;
         // More specific error messages based on the error
         if (error.includes('credentials') || error.includes('Invalid email or password')) {
           setError('Invalid email or password');
@@ -89,6 +102,28 @@ const Login = () => {
     }
   };
   
+  // Handle device approval
+  const handleDeviceApprovalResponse = async (approved) => {
+    try {
+      setLoading(true);
+      const result = await handleDeviceApproval(approved);
+      
+      if (result.success) {
+        console.log('Device approved and login successful, redirecting...');
+        window.location.href = from;
+      } else if (result.cancelled) {
+        setError('Login cancelled. You can try logging in from another device.');
+      } else {
+        setError(result.error || 'Device approval failed. Please try again.');
+      }
+    } catch (err) {
+      console.error('Device approval error:', err);
+      setError('An unexpected error occurred during device approval.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Container component="main" maxWidth="xs">
       <Box
@@ -177,6 +212,14 @@ const Login = () => {
           </Box>
         </Paper>
       </Box>
+      
+      {/* Device Approval Modal */}
+      <DeviceApprovalModal
+        open={showDeviceApproval}
+        onApprove={() => handleDeviceApprovalResponse(true)}
+        onCancel={() => handleDeviceApprovalResponse(false)}
+        loading={loading}
+      />
     </Container>
   );
 };

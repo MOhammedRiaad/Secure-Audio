@@ -8,7 +8,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
+
   const [sessionToken, setSessionToken] = useState(null);
   const [drmStatus, setDrmStatus] = useState(null);
   const [error, setError] = useState(null);
@@ -66,13 +66,18 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       initializeDRM();
     }
     
-    // DRM Security: Disable developer tools and right-click
+    // Enhanced DRM Security: Disable developer tools, right-click, and download attempts
     const handleKeyDown = (e) => {
-      // Disable F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U
+      // Disable F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U, Ctrl+S
       if (e.key === 'F12' || 
           (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J')) ||
-          (e.ctrlKey && e.key === 'u')) {
+          (e.ctrlKey && (e.key === 'u' || e.key === 'U' || e.key === 's' || e.key === 'S')) ||
+          (e.ctrlKey && e.shiftKey && e.key === 'C') || // Disable Ctrl+Shift+C
+          (e.key === 'F11') || // Disable fullscreen
+          (e.ctrlKey && e.key === 'p') || // Disable print
+          (e.ctrlKey && e.key === 'P')) {
         e.preventDefault();
+        console.warn('DRM: Blocked security bypass attempt');
         return false;
       }
     };
@@ -163,13 +168,14 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
     if (sessionToken && audioRef.current) {
       const audio = audioRef.current;
       
-      // Disable context menu to prevent download attempts
-      audio.oncontextmenu = (e) => e.preventDefault();
+      // Enhanced security for native controls
+      enhanceNativePlayerSecurity();
       
       // Security event listeners
       const handleSecurityViolation = (e) => {
-        console.warn('Security violation detected:', e.type);
+        console.warn('DRM Security: Violation detected -', e.type);
         e.preventDefault();
+        e.stopPropagation();
         return false;
       };
       
@@ -177,6 +183,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       audio.addEventListener('contextmenu', handleSecurityViolation);
       audio.addEventListener('dragstart', handleSecurityViolation);
       audio.addEventListener('selectstart', handleSecurityViolation);
+      audio.addEventListener('copy', handleSecurityViolation);
       
       // Audio event listeners
       const handleLoadedMetadata = () => {
@@ -219,33 +226,85 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         audio.removeEventListener('contextmenu', handleSecurityViolation);
         audio.removeEventListener('dragstart', handleSecurityViolation);
         audio.removeEventListener('selectstart', handleSecurityViolation);
+        audio.removeEventListener('copy', handleSecurityViolation);
       };
     }
   }, [sessionToken]);
   
-  const togglePlayPause = async () => {
+  // Enhanced security for native audio controls
+  const enhanceNativePlayerSecurity = () => {
     if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        if (!sessionToken && !usingSignedUrl) {
-          await initializeDRM();
-        }
-        
-        audioRef.current.play().catch(e => {
-          setError('Playback failed');
+      const audio = audioRef.current;
+      
+      // Prevent right-click context menu on audio controls
+      audio.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      });
+      
+      // Prevent drag and drop
+      audio.addEventListener('dragstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      });
+      
+      // Prevent text selection
+      audio.addEventListener('selectstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      });
+      
+      // Monitor for download attempts and security events
+       audio.addEventListener('loadstart', () => {
+         console.log('DRM: Secure stream loading initiated');
+       });
+       
+       // Prevent save/download through browser menu and monitor source
+        audio.addEventListener('progress', () => {
+          // Continuously monitor for unauthorized access attempts
+          if (audio.src && !audio.src.includes('/drm/stream/') && !audio.src.includes('blob:')) {
+            console.warn('DRM: Unauthorized source detected');
+          }
         });
-      }
-    }
-  };
-  
-  const handleSeek = (e) => {
-    if (audioRef.current && duration > 0) {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const percent = (e.clientX - rect.left) / rect.width;
-      const newTime = percent * duration;
-      audioRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
+        
+        // Obfuscate audio source in developer tools
+        try {
+          const srcDescriptor = Object.getOwnPropertyDescriptor(audio, 'src');
+          if (!srcDescriptor || srcDescriptor.configurable !== false) {
+            Object.defineProperty(audio, 'src', {
+              get: function() {
+                return '[DRM PROTECTED SOURCE]';
+              },
+              set: function(value) {
+                // Allow setting but hide the actual URL
+                this.setAttribute('src', value);
+              },
+              configurable: false
+            });
+          }
+        } catch (error) {
+          console.warn('DRM: Could not obfuscate src property:', error.message);
+        }
+       
+       // Block picture-in-picture attempts
+       audio.addEventListener('enterpictureinpicture', (e) => {
+         e.preventDefault();
+         audio.exitPictureInPicture?.();
+         console.warn('DRM: Picture-in-picture blocked');
+       });
+      
+      // Prevent keyboard shortcuts on audio element
+      audio.addEventListener('keydown', (e) => {
+        // Allow basic playback controls but prevent download shortcuts
+        if (e.ctrlKey && (e.key === 's' || e.key === 'S')) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+      });
     }
   };
 
@@ -339,16 +398,13 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
     seekToRegular: seekToRegular,
     getCurrentTime: () => currentTime,
     getDuration: () => duration,
-    isPlaying: () => isPlaying
+    isPlaying: () => isPlaying,
+    play: () => audioRef.current?.play(),
+    pause: () => audioRef.current?.pause(),
+    getAudioElement: () => audioRef.current
   }), [currentTime, duration, isPlaying]);
   
-  const handleVolumeChange = (e) => {
-    const newVolume = parseFloat(e.target.value);
-    setVolume(newVolume);
-    if (audioRef.current) {
-      audioRef.current.volume = newVolume;
-    }
-  };
+
   
   const formatTime = (time) => {
     if (!time || time < 0) return '0:00';
@@ -424,18 +480,38 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         margin: '10px 0',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
       }}>
-      {/* Hidden audio element */}
+      {/* Native audio player with DRM security */}
       <audio
         ref={audioRef}
+        controls
         preload="metadata"
         controlsList="nodownload nofullscreen noremoteplayback"
         disablePictureInPicture
         onContextMenu={(e) => e.preventDefault()}
-         onDragStart={(e) => e.preventDefault()}
+        onDragStart={(e) => e.preventDefault()}
+        onCopy={(e) => e.preventDefault()}
+         onSelectStart={(e) => e.preventDefault()}
+         onDoubleClick={(e) => e.preventDefault()}
+         onMouseDown={(e) => {
+           // Prevent middle-click and right-click
+           if (e.button === 1 || e.button === 2) {
+             e.preventDefault();
+           }
+         }}
         style={{ 
-          display: 'none',
+          width: '100%',
+          height: '54px',
           userSelect: 'none',
-          pointerEvents: 'none'
+          WebkitUserSelect: 'none',
+          MozUserSelect: 'none',
+          msUserSelect: 'none',
+          WebkitTouchCallout: 'none',
+          WebkitUserDrag: 'none',
+          KhtmlUserSelect: 'none',
+          outline: 'none',
+          border: '1px solid #dee2e6',
+          borderRadius: '4px',
+          backgroundColor: '#ffffff'
         }}
       />
       
@@ -456,91 +532,56 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         </div>
       )}
       
-      {/* Custom Player Controls */}
+      {/* Player Status Information */}
       <div style={{
         display: 'flex',
+        justifyContent: 'space-between',
         alignItems: 'center',
-        gap: '15px'
+        marginTop: '10px',
+        padding: '8px 12px',
+        background: '#f8f9fa',
+        border: '1px solid #dee2e6',
+        borderRadius: '4px',
+        fontSize: '14px'
       }}>
-        <button 
-          style={{
-            background: sessionToken ? '#007bff' : '#6c757d',
-            border: 'none',
-            borderRadius: '50%',
-            width: '50px',
-            height: '50px',
-            fontSize: '20px',
-            cursor: sessionToken ? 'pointer' : 'not-allowed',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-          onClick={togglePlayPause}
-          disabled={!sessionToken}
-        >
-          {isPlaying ? '⏸️' : '▶️'}
-        </button>
-        
-
-        
         <div style={{
           fontFamily: 'monospace',
-          fontSize: '14px',
-          minWidth: '100px'
+          color: '#495057'
         }}>
           {formatTime(currentTime)} / {formatTime(duration)}
         </div>
-        
-        <div 
-          className="progress-bar"
-          onClick={handleSeek}
-          style={{
-            width: '100%',
-            height: '6px',
-            backgroundColor: '#ddd',
-            borderRadius: '3px',
-            cursor: 'pointer',
-            margin: '0 10px'
-          }}
-        >
-          <div 
-            className="progress-fill"
-            style={{
-              width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%',
-              height: '100%',
-              backgroundColor: '#007bff',
-              borderRadius: '3px',
-              transition: 'width 0.1s ease'
-            }}
-          />
-        </div>
-        
         <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '5px'
+          color: sessionToken ? '#28a745' : '#6c757d',
+          fontWeight: 'bold'
         }}>
-          <span>🔊</span>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.1"
-            value={volume}
-            onChange={handleVolumeChange}
-            style={{ width: '80px' }}
-          />
+          {sessionToken ? '🟢 Ready' : '🔴 Initializing...'}
         </div>
       </div>
       
-      {/* Security Notice */}
+      {/* Security Notice and Watermark */}
       <div style={{ 
         fontSize: '12px', 
         color: '#666', 
         marginTop: '10px',
-        textAlign: 'center'
+        textAlign: 'center',
+        position: 'relative'
       }}>
         🛡️ This content is protected by DRM. Downloading or copying is prohibited.
+        <div style={{
+          position: 'absolute',
+          top: '-70px',
+          right: '10px',
+          background: 'rgba(0, 0, 0, 0.1)',
+          color: 'rgba(0, 0, 0, 0.3)',
+          padding: '2px 6px',
+          borderRadius: '3px',
+          fontSize: '10px',
+          fontWeight: 'bold',
+          pointerEvents: 'none',
+          userSelect: 'none'
+        }}>
+          PROTECTED
+        </div>
       </div>
 
     </div>

@@ -15,6 +15,8 @@ export const AuthProvider = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [deviceSession, setDeviceSession] = useState(null);
   const [deviceWarnings, setDeviceWarnings] = useState([]);
+  const [showDeviceApproval, setShowDeviceApproval] = useState(false);
+  const [pendingLoginData, setPendingLoginData] = useState(null);
 
   // Set auth token for API requests
   const setAuthToken = (token) => {
@@ -78,7 +80,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Login user
-  const login = async (email, password) => {
+  const login = async (email, password, deviceApproved = false) => {
     try {
       console.log('AuthContext: Attempting login with email:', email);
       
@@ -87,6 +89,7 @@ export const AuthProvider = ({ children }) => {
       const loginData = {
         email,
         password,
+        deviceApproved,
         deviceData: {
           deviceId: deviceFingerprint.getOrCreateDeviceId(),
           deviceFingerprint: deviceFingerprint.getDeviceFingerprint(),
@@ -108,6 +111,18 @@ export const AuthProvider = ({ children }) => {
       
       if (!data.success) {
         console.error('AuthContext: Login failed - success is false');
+        
+        // Check if this is a device approval required error
+        if (data.requiresDeviceApproval) {
+          setPendingLoginData({ email, password });
+          setShowDeviceApproval(true);
+          return { 
+            success: false, 
+            requiresDeviceApproval: true,
+            message: data.message || 'Device approval required'
+          };
+        }
+        
         throw new Error(data.message || 'Login failed');
       }
       
@@ -142,6 +157,10 @@ export const AuthProvider = ({ children }) => {
         setDeviceWarnings(warnings);
       }
       
+      // Clear pending login data and hide approval modal
+      setPendingLoginData(null);
+      setShowDeviceApproval(false);
+      
       return { 
         success: true, 
         deviceSession: sessionData,
@@ -154,6 +173,30 @@ export const AuthProvider = ({ children }) => {
         error: err.response?.data?.error?.message || err.response?.data?.message || 'Login failed. Please check your credentials.' 
       };
     }
+  };
+
+  // Handle device approval
+  const handleDeviceApproval = async (approved) => {
+    if (!pendingLoginData) {
+      return { success: false, error: 'No pending login data' };
+    }
+
+    if (!approved) {
+      // User cancelled device approval
+      setPendingLoginData(null);
+      setShowDeviceApproval(false);
+      return { success: false, cancelled: true };
+    }
+
+    // User approved device, proceed with login
+    const { email, password } = pendingLoginData;
+    return await login(email, password, true);
+  };
+
+  // Cancel device approval
+  const cancelDeviceApproval = () => {
+    setPendingLoginData(null);
+    setShowDeviceApproval(false);
   };
 
   // Logout user
@@ -219,6 +262,8 @@ export const AuthProvider = ({ children }) => {
     token,
     deviceSession,
     deviceWarnings,
+    showDeviceApproval,
+    pendingLoginData,
     login,
     logout,
     register,
@@ -227,6 +272,8 @@ export const AuthProvider = ({ children }) => {
     getActiveDevices,
     deactivateDevice,
     deactivateOtherDevices,
+    handleDeviceApproval,
+    cancelDeviceApproval,
   };
 
   return (
