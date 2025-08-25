@@ -267,7 +267,8 @@ exports.streamSignedAudio = asyncHandler(async (req, res, next) => {
           // Set appropriate headers for audio streaming
           res.setHeader('Content-Type', 'audio/mpeg');
           res.setHeader('Accept-Ranges', 'bytes');
-          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
+          res.setHeader('Access-Control-Allow-Credentials', 'true');
           res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
           res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
           res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
@@ -297,7 +298,8 @@ exports.streamSignedAudio = asyncHandler(async (req, res, next) => {
             contentType: meta.contentType || 'audio/mpeg',
           });
           
-          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
+          res.setHeader('Access-Control-Allow-Credentials', 'true');
           res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
           res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
           res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
@@ -322,7 +324,8 @@ exports.streamSignedAudio = asyncHandler(async (req, res, next) => {
       contentType: meta.contentType || 'audio/mpeg',
     });
     
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');

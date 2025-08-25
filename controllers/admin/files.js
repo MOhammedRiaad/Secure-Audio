@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const ErrorResponse = require('../../utils/errorResponse');
 const asyncHandler = require('../../middleware/async');
+const { bufferToBase64 } = require('../../middleware/imageUpload');
 
 const prisma = new PrismaClient();
 
@@ -93,6 +94,91 @@ exports.getFile = asyncHandler(async (req, res, next) => {
   res.status(200).json({
     success: true,
     data: file,
+  });
+});
+
+// @desc    Update file metadata
+// @route   PUT /api/v1/admin/files/:id
+// @access  Private/Admin
+exports.updateFile = asyncHandler(async (req, res, next) => {
+  const { title, description, isPublic, coverStorageType } = req.body;
+  const coverFile = req.files?.cover;
+  
+  const file = await prisma.audioFile.findUnique({
+    where: {
+      id: parseInt(req.params.id),
+    },
+  });
+
+  if (!file) {
+    return next(
+      new ErrorResponse(`File not found with id of ${req.params.id}`, 404)
+    );
+  }
+
+  // Handle cover image update
+  let coverImagePath = file.coverImagePath;
+  let coverImageBase64 = file.coverImageBase64;
+  let coverImageMimeType = file.coverImageMimeType;
+
+  if (coverFile) {
+    coverImageMimeType = coverFile.mimetype;
+    
+    if (coverStorageType === 'base64') {
+      // Store as base64 in database
+      const imageBuffer = fs.readFileSync(coverFile.tempFilePath);
+      coverImageBase64 = bufferToBase64(imageBuffer, coverFile.mimetype);
+      coverImagePath = null; // Clear file path when using base64
+    } else {
+      // Store as file
+      coverImagePath = path.basename(coverFile.path);
+      coverImageBase64 = null; // Clear base64 when using file storage
+    }
+  }
+
+  const updatedFile = await prisma.audioFile.update({
+    where: {
+      id: parseInt(req.params.id),
+    },
+    data: {
+      ...(title && { title }),
+      ...(description && { description }),
+      ...(typeof isPublic === 'boolean' && { isPublic }),
+      ...(coverFile && {
+        coverImagePath,
+        coverImageBase64,
+        coverImageMimeType,
+      }),
+    },
+    include: {
+      fileAccesses: {
+        select: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      },
+      checkpoints: {
+        select: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  res.status(200).json({
+    success: true,
+    data: updatedFile,
   });
 });
 

@@ -3,6 +3,7 @@ const { protect, authorize } = require('../../middleware/auth');
 const {
   getFiles,
   getFile,
+  updateFile,
   deleteFile,
   getFileStats
 } = require('../../controllers/admin/files');
@@ -21,6 +22,7 @@ router.route('/stats')
 
 router.route('/:id')
   .get(getFile)
+  .put(updateFile)
   .delete(deleteFile);
 
 module.exports = router;
