@@ -214,7 +214,6 @@ const ChapterManager = ({ fileId, file, onPlayChapter }) => {
       
       // Add security headers and play
       audio.addEventListener('loadstart', () => {
-        console.log(`🎵 Starting chapter playback: ${chapter.label}`);
       });
       
       audio.addEventListener('error', (e) => {

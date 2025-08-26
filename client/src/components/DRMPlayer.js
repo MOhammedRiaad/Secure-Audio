@@ -23,7 +23,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       return;
     }
 
-    console.log(`🔄 Initializing DRM (attempt ${retryCount + 1}/3)...`);
     setIsLoading(true);
     setError(null);
     
@@ -35,7 +34,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         chunkedStreaming: true
       });
       
-      console.log('✅ DRM status retrieved successfully');
       
       // Generate secure session
       const sessionResponse = await api.post(`/drm/session/${fileId}`, {});
@@ -43,11 +41,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       setSessionToken(sessionResponse.data.data.sessionToken);
       setDuration(sessionResponse.data.data.duration || 0);
       
-      console.log('✅ DRM session initialized successfully:', {
-        fileId,
-        duration: sessionResponse.data.data.duration,
-        sessionToken: sessionResponse.data.data.sessionToken ? 'received' : 'none'
-      });
       
     } catch (error) {
       console.error(`🚨 DRM initialization failed (attempt ${retryCount + 1}):`, error);
@@ -63,7 +56,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       } else if (error.response?.status >= 500) {
         // Server error - retry might help
         if (retryCount < 2) {
-          console.log(`🔄 Server error, retrying in 2 seconds... (attempt ${retryCount + 2}/3)`);
           setTimeout(() => {
             initializeDRM(retryCount + 1);
           }, 2000);
@@ -146,10 +138,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       const streamUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000/api/v1'}/drm/stream/${sessionToken}`;
       const correctedStreamUrl = streamUrl.replace('/api/v1/api/v1', '/api/v1');
       
-      console.log('🔐 Setting up DRM audio streaming:', {
-        sessionToken: sessionToken ? `${sessionToken.substring(0, 20)}...` : 'none',
-        streamUrl: correctedStreamUrl
-      });
       
       if (audioRef.current) {
         audioRef.current.src = correctedStreamUrl;
@@ -184,7 +172,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
               });
               
               if (response.status === 403) {
-                console.log('✅ Confirmed: DRM session expired (403), reinitializing...');
                 // Clear current session and reinitialize
                 setSessionToken(null);
                 setUsingSignedUrl(false);
@@ -205,7 +192,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         audioRef.current.addEventListener('loadedmetadata', () => {
           if (audioRef.current) {
             setDuration(audioRef.current.duration || 0);
-            console.log('✅ DRM audio metadata loaded, duration:', audioRef.current.duration);
           }
         });
         
@@ -219,9 +205,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
           setIsPlaying(false);
         });
         
-        audioRef.current.addEventListener('canplay', () => {
-          console.log('✅ DRM audio ready to play');
-        });
+        audioRef.current.addEventListener('canplay', () => {});
       }
       
     } catch (error) {
@@ -328,7 +312,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       
       // Monitor for download attempts and security events
        audio.addEventListener('loadstart', () => {
-         console.log('DRM: Secure stream loading initiated');
        });
        
         // Prevent save/download through browser menu and monitor source
@@ -387,36 +370,30 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       return;
     }
     
-    console.log(`DRM: Using regular seek to ${timeInSeconds} seconds`);
     const actualDuration = duration || (audioRef.current ? audioRef.current.duration : 0);
     
     if (audioRef.current && actualDuration > 0) {
       const clampedTime = Math.max(0, Math.min(timeInSeconds, actualDuration));
       
       if (audioRef.current.readyState >= 2) {
-        console.log(`DRM: Audio ready, setting currentTime to ${clampedTime}`);
         audioRef.current.currentTime = clampedTime;
         setCurrentTime(clampedTime);
         
         if (audioRef.current.paused) {
           audioRef.current.play().then(() => {
             setIsPlaying(true);
-            console.log(`DRM: Playback started at ${audioRef.current.currentTime} seconds`);
           }).catch(err => {
             console.error('Playback failed:', err);
           });
         }
       } else {
-        console.log(`DRM: Audio not ready, waiting for loadeddata event`);
         const handleLoadedData = () => {
-          console.log(`DRM: loadeddata event fired, setting currentTime to ${clampedTime}`);
           audioRef.current.currentTime = clampedTime;
           setCurrentTime(clampedTime);
           
           if (audioRef.current.paused) {
             audioRef.current.play().then(() => {
               setIsPlaying(true);
-              console.log(`DRM: Playback started at ${audioRef.current.currentTime} seconds`);
             }).catch(err => {
               console.error('Playback failed:', err);
             });
@@ -441,7 +418,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       });
       
       const { signedUrl } = response.data.data;
-      console.log(`DRM: Seeking to ${timeInSeconds} seconds with signed URL`);
       
       if (audioRef.current) {
         audioRef.current.src = signedUrl;
@@ -449,8 +425,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         
         const handleCanPlayThrough = () => {
           // The backend provides a pre-seeked stream, so we don't need to manually set currentTime
-          console.log(`DRM: Audio canplaythrough event fired, readyState: ${audioRef.current.readyState}, duration: ${audioRef.current.duration}`);
-          console.log(`DRM: Stream currentTime is ${audioRef.current.currentTime} (backend pre-seeked)`);
           
           // Update our state to reflect the backend-provided position
           setCurrentTime(audioRef.current.currentTime);
@@ -458,7 +432,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
           // Start playback directly - the stream is already at the correct position
           audioRef.current.play().then(() => {
             setIsPlaying(true);
-            console.log(`DRM: Playback started at ${audioRef.current.currentTime} seconds (pre-seeked by backend)`);
           }).catch(err => {
             console.error('Playback failed:', err);
           });
@@ -477,11 +450,9 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
   // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     seekTo: (timeInSeconds) => {
-      console.log(`DRM: seekTo called with time ${timeInSeconds}`);
       seekToWithSignedUrl(timeInSeconds);
     },
     playChapter: async (chapter) => {
-      console.log(`🎵 DRMPlayer.playChapter called for: ${chapter.label}`);
       
       try {
         // Generate secure signed URL for chapter streaming
@@ -507,7 +478,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
             if (onError) onError(`Failed to play chapter: ${err.message}`);
           });
           
-          console.log(`✅ Started playing chapter: ${chapter.label}`);
         }
       } catch (err) {
         console.error('Chapter streaming error:', err);
@@ -529,13 +499,13 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
     getAudioElement: () => audioRef.current
   }), [currentTime, duration, isPlaying, seekToRegular, seekToWithSignedUrl, fileId, onError]);
   
-
-  const formatTime = (time) => {
-    if (!time || time < 0) return '0:00';
+  // Format time in seconds to H:M:S or M:S
+  const formatTime = (timeInSeconds) => {
+    if (!timeInSeconds || timeInSeconds < 0) return '0:00';
     
-    const hours = Math.floor(time / 3600);
-    const minutes = Math.floor((time % 3600) / 60);
-    const seconds = Math.floor(time % 60);
+    const hours = Math.floor(timeInSeconds / 3600);
+    const minutes = Math.floor((timeInSeconds % 3600) / 60);
+    const seconds = Math.floor(timeInSeconds % 60);
     
     if (hours > 0) {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;

@@ -50,8 +50,6 @@ const AudioPlayer = () => {
     description: '',
     timestamp: 0,
   });
-  const [drmEnabled, setDrmEnabled] = useState(true);
-  
   // Ref for DRM player to control playback
   const drmPlayerRef = useRef(null);
 
@@ -98,27 +96,9 @@ const AudioPlayer = () => {
     };
   }, [id]);
 
-  // Debug: Log chapter data when it changes
-  useEffect(() => {
-    if (chapters && chapters.length > 0) {
-      console.log('📖 Chapters loaded:', chapters.map(ch => ({ label: ch.label, startTime: ch.startTime, type: typeof ch.startTime })));
-    }
-  }, [chapters]);
-
-
-
-  // Audio initialization handled by DRM player
-
-  // Handle DRM toggle (for admin users)
-  const toggleDRM = () => {
-    setDrmEnabled(!drmEnabled);
-  };
-
   // Jump to checkpoint or chapter
   const jumpToCheckpoint = (timestamp) => {
-    console.log('🎯 jumpToCheckpoint called with timestamp:', timestamp, 'type:', typeof timestamp);
     if (drmPlayerRef.current) {
-      console.log('📱 DRM player ref exists, calling seekTo');
       drmPlayerRef.current.seekTo(timestamp);
     } else {
       console.error('❌ DRM player ref is null');
@@ -127,7 +107,6 @@ const AudioPlayer = () => {
 
   // Handle chapter playback through DRMPlayer
   const handlePlayChapter = (chapter) => {
-    console.log('🎵 Playing chapter:', chapter.label);
     if (drmPlayerRef.current) {
       drmPlayerRef.current.playChapter(chapter);
     } else {

@@ -33,7 +33,6 @@ api.interceptors.request.use(
     // Add device ID header for device tracking
     config.headers['X-Device-ID'] = deviceFingerprint.deviceId;
     
-    console.log('Request headers:', config.headers);
     return config;
   },
   (error) => {

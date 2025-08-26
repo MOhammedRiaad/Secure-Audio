@@ -55,14 +55,10 @@ exports.getAudioChapters = asyncHandler(async (req, res, next) => {
 
   // Get chapters for the file
   try {
-    console.log(`Fetching chapters for fileId: ${fileId} (type: ${typeof fileId})`);
-    
     // First, try a simple count to test the connection
     const chapterCount = await prisma.audioChapter.count({
       where: { fileId: fileId }
     });
-    
-    console.log(`Found ${chapterCount} chapters for file ${fileId}`);
     
     // If count works, try the full query
     const chapters = await prisma.audioChapter.findMany({
@@ -332,8 +328,6 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
   const maxConcurrent = performanceConfig.chapters.maxConcurrentChapters;
 
   try {
-    console.log(`🚀 Starting chapter finalization for file ${file.filename} with ${file.chapters.length} chapters`);
-    console.log(`⚙️ Using max ${maxConcurrent} concurrent processing`);
     
     // Process chapters in batches for better memory management
     for (let i = 0; i < file.chapters.length; i += maxConcurrent) {
@@ -341,7 +335,6 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
       
       const batchPromises = batch.map(async (chapter) => {
         try {
-          console.log(`📖 Processing chapter: ${chapter.label} (${chapter.startTime}s - ${chapter.endTime || 'end'}s)`);
           
           // Extract audio segment from master file
           const segmentBuffer = await drm.extractAudioSegment(
@@ -351,12 +344,10 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
             file.encryptionKey
           );
           
-          console.log(`✂️ Extracted ${segmentBuffer.length} bytes for chapter ${chapter.label}`);
           
           // Encrypt the individual chapter segment
           const encryptionResult = drm.encryptChapterSegment(segmentBuffer);
           
-          console.log(`🔐 Encrypted chapter ${chapter.label}: ${encryptionResult.encryptedSize} bytes`);
           
           // Intelligent storage strategy based on size
           let selectedStorageType = storageType || performanceConfig.chapters.defaultStorageType;
@@ -396,12 +387,10 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
             fs.writeFileSync(chapterFilePath, encryptionResult.encryptedData);
             updateData.encryptedPath = path.join(performanceConfig.chapters.chapterStoragePath, chapterFileName);
             
-            console.log(`💾 Saved chapter ${chapter.label} to filesystem: ${chapterFileName} (${selectedStorageType})`);
           } else {
             // Store encrypted data directly in database (BYTEA)
             updateData.encryptedData = encryptionResult.encryptedData;
             
-            console.log(`🗃️ Stored chapter ${chapter.label} in database (${encryptionResult.encryptedSize} bytes) (${selectedStorageType})`);
           }
           
           // Update chapter record
@@ -415,7 +404,6 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
               encryptionResult.encryptedSize > performanceConfig.memory.gcThreshold) {
             if (global.gc) {
               global.gc();
-              console.log(`🗑️ Triggered garbage collection after processing large chapter`);
             }
           }
           
@@ -465,7 +453,6 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
         totalProcessed++;
       });
       
-      console.log(`🏁 Completed batch ${Math.floor(i / maxConcurrent) + 1}: ${totalProcessed}/${file.chapters.length} chapters processed`);
       
       // Brief pause between batches to prevent overwhelming the system
       if (i + maxConcurrent < file.chapters.length) {
@@ -482,8 +469,6 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
       return acc;
     }, {});
     
-    console.log(`🎯 Chapter finalization completed: ${successCount} success, ${errorCount} errors`);
-    console.log(`📈 Storage distribution:`, storageStats);
     
     res.status(200).json({
       success: true,
@@ -615,7 +600,6 @@ exports.streamChapter = asyncHandler(async (req, res, next) => {
     });
   }
   
-  console.log(`🔐 Chapter streaming security validation passed for user ${userId}, chapter ${chapterId}`);
   
   // Get chapter information with file access check
   const chapter = await prisma.audioChapter.findFirst({
@@ -671,7 +655,6 @@ exports.streamChapter = asyncHandler(async (req, res, next) => {
     if (chapter.encryptedData) {
       // Data stored in database (BYTEA)
       encryptedData = chapter.encryptedData;
-      console.log(`🗃️ Secure streaming chapter ${chapter.label} from database (${encryptedData.length} bytes)`);
     } else if (chapter.encryptedPath) {
       // Data stored in filesystem - use streaming for large files
       const chapterFilePath = path.join(process.env.FILE_UPLOAD_PATH, chapter.encryptedPath);
@@ -683,7 +666,6 @@ exports.streamChapter = asyncHandler(async (req, res, next) => {
       // For large files, stream directly instead of loading into memory
       const stats = fs.statSync(chapterFilePath);
       if (stats.size > 50 * 1024 * 1024) { // 50MB threshold
-        console.log(`💾 Secure streaming large chapter ${chapter.label} directly from filesystem (${stats.size} bytes)`);
         
         // Stream large encrypted file and decrypt on-the-fly with security headers
         const { Transform } = require('stream');
@@ -731,13 +713,11 @@ exports.streamChapter = asyncHandler(async (req, res, next) => {
           }
         });
         
-        console.log(`✅ Started secure streaming large chapter: ${chapter.label} to user ${userId}`);
         return;
       }
       
       // For smaller files, load into memory (original approach)
       encryptedData = fs.readFileSync(chapterFilePath);
-      console.log(`💾 Secure streaming chapter ${chapter.label} from filesystem (${encryptedData.length} bytes)`);
     } else {
       return next(new ErrorResponse('Chapter data not found', 404));
     }
@@ -779,7 +759,6 @@ exports.streamChapter = asyncHandler(async (req, res, next) => {
     res.status(200);
     res.end(decryptedData);
     
-    console.log(`✅ Successfully streamed secure chapter: ${chapter.label} to user ${userId}`);
     
   } catch (error) {
     console.error('Secure chapter streaming error:', error);
@@ -866,7 +845,6 @@ exports.generateChapterStreamUrl = asyncHandler(async (req, res, next) => {
     `token=${encodeURIComponent(jwtToken)}&` +
     `start=0&end=-1`;
   
-  console.log(`🔗 Generated secure chapter stream URL for chapter ${chapter.label} (expires in ${Math.floor(expiresIn/1000/60)} minutes)`);
   
   res.status(200).json({
     success: true,

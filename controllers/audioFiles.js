@@ -16,7 +16,6 @@ try {
     ffmpeg.setFfprobePath(ffprobeStatic.path);
     ffmpegAvailable = true;
   } catch (error) {
-  console.warn('FFmpeg not available. Audio duration detection will be limited.');
 }
 
 // Create a fresh Prisma client instance
@@ -66,7 +65,7 @@ exports.getAudioFiles = asyncHandler(async (req, res, next) => {
       title: true,
       description: true,
       duration: true,
-      fileSize: true,
+      size: true,
       isPublic: true,
       coverImagePath: true,
       coverImageBase64: true,
@@ -117,11 +116,8 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
   }
 
   try {
-    console.log(`Fetching audio file with ID: ${fileId} (type: ${typeof fileId})`);
-    
     // Test basic connectivity first
     await prisma.$queryRaw`SELECT 1 as test`;
-    console.log('Database connection test passed');
     
     // Try a simpler query first with only safe fields
     const file = await prisma.audioFile.findUnique({
@@ -131,7 +127,7 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
         title: true,
         description: true,
         duration: true,
-        fileSize: true,
+        size: true,
         isPublic: true,
         coverImagePath: true,
         coverImageBase64: true,
@@ -155,7 +151,6 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
         });
         file.checkpoints = checkpoints;
       } catch (checkpointError) {
-        console.warn('Failed to fetch checkpoints:', checkpointError.message);
         file.checkpoints = [];
       }
       
@@ -177,7 +172,6 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
         });
         file.chapters = chapters;
       } catch (chapterError) {
-        console.warn('Failed to fetch chapters (likely corrupted data):', chapterError.message);
         file.chapters = [];
       }
     }
@@ -432,7 +426,6 @@ exports.streamAudioFile = asyncHandler(async (req, res, next) => {
       decryptedStream.pipe(res);
       
       // Log the streaming access
-      console.log(`Encrypted file streamed: ${file.filename} by user ${userId}`);
       return;
       
     } catch (decryptError) {
@@ -555,6 +548,5 @@ const getAudioDuration = async (filePath) => {
   }
   
   // Fallback: Return 0 if ffmpeg is not available
-  console.warn('FFmpeg not available. Using default duration of 0.');
   return 0;
 };
