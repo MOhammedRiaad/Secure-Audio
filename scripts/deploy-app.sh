@@ -31,7 +31,7 @@ warning() {
 
 # Configuration
 APP_DIR="/var/www/secure-audio"
-REPO_URL="https://github.com/yourusername/secure-audio.git"  # Update this!
+REPO_URL="https://github.com/MOhammedRiaad/Secure-Audio.git"
 BRANCH="main"
 
 # Check if this is initial deployment or update
@@ -49,6 +49,11 @@ cd $APP_DIR
 if [ "$DEPLOYMENT_TYPE" = "initial" ]; then
     # Initial deployment
     log "Cloning repository..."
+    if [ "$(ls -A $APP_DIR)" ]; then
+        warning "Directory not empty, removing existing files..."
+        rm -rf $APP_DIR/*
+        rm -rf $APP_DIR/.[^.]*
+    fi
     git clone $REPO_URL .
     
     # Check if .env file exists
