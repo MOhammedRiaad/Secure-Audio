@@ -50,15 +50,20 @@ const AudioPlayer = () => {
     description: '',
     timestamp: 0,
   });
-  const [drmEnabled, setDrmEnabled] = useState(true);
-  
   // Ref for DRM player to control playback
   const drmPlayerRef = useRef(null);
 
-  // Format time in seconds to MM:SS
+  // Format time in seconds to H:M:S or M:S
   const formatTime = (timeInSeconds) => {
-    const minutes = Math.floor(timeInSeconds / 60);
+    if (!timeInSeconds || timeInSeconds < 0) return '0:00';
+    
+    const hours = Math.floor(timeInSeconds / 3600);
+    const minutes = Math.floor((timeInSeconds % 3600) / 60);
     const seconds = Math.floor(timeInSeconds % 60);
+    
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
@@ -91,28 +96,19 @@ const AudioPlayer = () => {
     };
   }, [id]);
 
-  // Debug: Log chapter data when it changes
-  useEffect(() => {
-    if (chapters && chapters.length > 0) {
-      console.log('📖 Chapters loaded:', chapters.map(ch => ({ label: ch.label, startTime: ch.startTime, type: typeof ch.startTime })));
-    }
-  }, [chapters]);
-
-
-
-  // Audio initialization handled by DRM player
-
-  // Handle DRM toggle (for admin users)
-  const toggleDRM = () => {
-    setDrmEnabled(!drmEnabled);
-  };
-
   // Jump to checkpoint or chapter
   const jumpToCheckpoint = (timestamp) => {
-    console.log('🎯 jumpToCheckpoint called with timestamp:', timestamp, 'type:', typeof timestamp);
     if (drmPlayerRef.current) {
-      console.log('📱 DRM player ref exists, calling seekTo');
       drmPlayerRef.current.seekTo(timestamp);
+    } else {
+      console.error('❌ DRM player ref is null');
+    }
+  };
+
+  // Handle chapter playback through DRMPlayer
+  const handlePlayChapter = (chapter) => {
+    if (drmPlayerRef.current) {
+      drmPlayerRef.current.playChapter(chapter);
     } else {
       console.error('❌ DRM player ref is null');
     }
@@ -225,16 +221,16 @@ const AudioPlayer = () => {
                 <React.Fragment key={chapter.id}>
                   <ListItem disablePadding>
                     <ListItemButton
-                      onClick={() => jumpToCheckpoint(chapter.startTime)}
+                      onClick={() => handlePlayChapter(chapter)}
                     >
                       <ListItemIcon>
                         <MenuBook />
                       </ListItemIcon>
                       <ListItemText
                         primary={chapter.label}
-                        secondary={formatTime(chapter.startTime)}
+                        secondary={`${formatTime(chapter.startTime)} - ${formatTime(chapter.endTime)} • ${chapter.status === 'ready' ? 'Ready' : 'Processing'}`}
                       />
-                      <PlayArrow sx={{ ml: 1, color: 'primary.main' }} />
+                      <PlayArrow sx={{ ml: 1, color: chapter.status === 'ready' ? 'primary.main' : 'text.disabled' }} />
                     </ListItemButton>
                   </ListItem>
                   {index < chapters.length - 1 && <Divider component="li" />}

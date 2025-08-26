@@ -40,11 +40,38 @@ exports.protect = async (req, res, next) => {
     
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('Token decoded successfully:', { id: decoded.id, role: decoded.role });
+    console.log('Token decoded successfully:', { id: decoded.id, role: decoded.role, exp: decoded.exp });
     
     if (!decoded.id) {
       console.error('Token missing user ID');
       return next(new ErrorResponse('Invalid token - missing user ID', 401));
+    }
+
+    // Explicit token expiry validation (additional check beyond JWT's built-in validation)
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+    const tokenExpiry = decoded.exp;
+    
+    if (!tokenExpiry) {
+      console.error('Token missing expiry timestamp');
+      return next(new ErrorResponse('Invalid token - missing expiry', 401));
+    }
+    
+    if (currentTimestamp >= tokenExpiry) {
+      console.error('Token expired explicitly:', {
+        current: currentTimestamp,
+        expiry: tokenExpiry,
+        expired: (currentTimestamp - tokenExpiry) + ' seconds ago'
+      });
+      return next(new ErrorResponse('Token has expired. Please log in again.', 403));
+    }
+    
+    // Check if token is expiring soon (within 5 minutes) and log warning
+    const timeUntilExpiry = tokenExpiry - currentTimestamp;
+    if (timeUntilExpiry <= 300) { // 5 minutes
+      console.warn('Token expiring soon:', {
+        timeLeft: timeUntilExpiry + ' seconds',
+        userId: decoded.id
+      });
     }
 
     // Get user with role information
@@ -119,17 +146,25 @@ exports.protect = async (req, res, next) => {
       stack: err.stack
     });
     
+    // Handle different types of JWT errors
     if (err.name === 'TokenExpiredError') {
-      return next(new ErrorResponse('Session expired. Please log in again.', 401));
+      console.error('JWT TokenExpiredError - token expired at:', err.expiredAt);
+      return next(new ErrorResponse('Session expired. Please log in again.', 403));
     }
     
-    console.error('Auth error:', err);
     if (err.name === 'JsonWebTokenError') {
-      return next(new ErrorResponse('Invalid token', 401));
-    } else if (err.name === 'TokenExpiredError') {
-      return next(new ErrorResponse('Token expired', 401));
+      console.error('JWT JsonWebTokenError - invalid token:', err.message);
+      return next(new ErrorResponse('Invalid authentication token', 401));
     }
-    return next(new ErrorResponse('Not authorized to access this route', 401));
+    
+    if (err.name === 'NotBeforeError') {
+      console.error('JWT NotBeforeError - token not active yet:', err.message);
+      return next(new ErrorResponse('Token not yet active', 401));
+    }
+    
+    // Generic token verification error
+    console.error('Auth error:', err);
+    return next(new ErrorResponse('Authentication failed', 401));
   }
 };
 

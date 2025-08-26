@@ -16,10 +16,19 @@ try {
     ffmpeg.setFfprobePath(ffprobeStatic.path);
     ffmpegAvailable = true;
   } catch (error) {
-  console.warn('FFmpeg not available. Audio duration detection will be limited.');
 }
 
-const prisma = new PrismaClient();
+// Create a fresh Prisma client instance
+const prisma = new PrismaClient({
+  log: ['query', 'info', 'warn', 'error'],
+  errorFormat: 'minimal'
+});
+
+// Handle Prisma client connection
+prisma.$connect().catch(err => {
+  console.error('Failed to connect to database:', err);
+});
+
 const drm = new AudioDRM();
 
 // @desc    Get all audio files (with access)
@@ -51,7 +60,17 @@ exports.getAudioFiles = asyncHandler(async (req, res, next) => {
   
   const files = await prisma.audioFile.findMany({
     where: whereClause,
-    include: {
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      duration: true,
+      size: true,
+      isPublic: true,
+      coverImagePath: true,
+      coverImageBase64: true,
+      createdAt: true,
+      updatedAt: true,
       checkpoints: {
         where: {
           userId: req.user.id
@@ -63,6 +82,16 @@ exports.getAudioFiles = asyncHandler(async (req, res, next) => {
       chapters: {
         orderBy: {
           order: 'asc'
+        },
+        select: {
+          id: true,
+          label: true,
+          startTime: true,
+          endTime: true,
+          order: true,
+          status: true,
+          createdAt: true,
+          finalizedAt: true
         }
       }
     }
@@ -79,46 +108,105 @@ exports.getAudioFiles = asyncHandler(async (req, res, next) => {
 // @route   GET /api/v1/files/:id
 // @access  Private
 exports.getAudioFile = asyncHandler(async (req, res, next) => {
-  const file = await prisma.audioFile.findUnique({
-    where: { id: parseInt(req.params.id) },
-    include: {
-      checkpoints: {
-        where: {
-          userId: req.user.id
-        },
-        orderBy: {
-          timestamp: 'asc'
-        }
-      },
-      chapters: {
-        orderBy: {
-          order: 'asc'
-        }
+  const fileId = parseInt(req.params.id);
+  
+  // Validate fileId
+  if (isNaN(fileId) || fileId <= 0) {
+    return next(new ErrorResponse('Invalid file ID', 400));
+  }
+
+  try {
+    // Test basic connectivity first
+    await prisma.$queryRaw`SELECT 1 as test`;
+    
+    // Try a simpler query first with only safe fields
+    const file = await prisma.audioFile.findUnique({
+      where: { id: fileId },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        duration: true,
+        size: true,
+        isPublic: true,
+        coverImagePath: true,
+        coverImageBase64: true,
+        createdAt: true,
+        updatedAt: true
+        // Exclude encryptedPath, encryptionKey, and other sensitive fields
+      }
+    });
+    
+    if (file) {
+      // If basic query works, try to get related data separately
+      try {
+        const checkpoints = await prisma.checkpoint.findMany({
+          where: {
+            fileId: fileId,
+            userId: req.user.id
+          },
+          orderBy: {
+            timestamp: 'asc'
+          }
+        });
+        file.checkpoints = checkpoints;
+      } catch (checkpointError) {
+        file.checkpoints = [];
+      }
+      
+      try {
+        const chapters = await prisma.audioChapter.findMany({
+          where: { fileId: fileId },
+          orderBy: { order: 'asc' },
+          select: {
+            id: true,
+            label: true,
+            startTime: true,
+            endTime: true,
+            order: true,
+            status: true,
+            createdAt: true,
+            finalizedAt: true
+            // Exclude encryptedData, encryptedPath, and size data for security
+          }
+        });
+        file.chapters = chapters;
+      } catch (chapterError) {
+        file.chapters = [];
       }
     }
-  });
 
-  if (!file) {
-    return next(
-      new ErrorResponse(`File not found with id of ${req.params.id}`, 404)
-    );
-  }
-
-  // Check if user has access (admins have access to all files)
-  if (req.user.role !== 'admin') {
-    const hasAccess = await checkFileAccess(req.user.id, file.id);
-    
-    if (!hasAccess && !file.isPublic) {
+    if (!file) {
       return next(
-        new ErrorResponse(`Not authorized to access this file`, 403)
+        new ErrorResponse(`File not found with id of ${fileId}`, 404)
       );
     }
-  }
 
-  res.status(200).json({
-    success: true,
-    data: file
-  });
+    // Check if user has access (admins have access to all files)
+    if (req.user.role !== 'admin') {
+      const hasAccess = await checkFileAccess(req.user.id, file.id);
+      
+      if (!hasAccess && !file.isPublic) {
+        return next(
+          new ErrorResponse(`Not authorized to access this file`, 403)
+        );
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: file
+    });
+  } catch (error) {
+    console.error('Error fetching audio file:', {
+      message: error.message,
+      code: error.code,
+      name: error.name,
+      fileId: fileId,
+      fileIdType: typeof fileId
+    });
+    return next(new ErrorResponse(`Failed to fetch audio file: ${error.message}`, 500));
+  }
 });
 
 // @desc    Upload audio file
@@ -196,6 +284,7 @@ exports.uploadAudioFile = asyncHandler(async (req, res, next) => {
         isEncrypted: true,
         encryptionKey: encryptionResult.key,
         encryptionIV: encryptionResult.iv,
+        encryptionTag: encryptionResult.authTag,
         coverImagePath,
         coverImageBase64,
         coverImageMimeType
@@ -337,7 +426,6 @@ exports.streamAudioFile = asyncHandler(async (req, res, next) => {
       decryptedStream.pipe(res);
       
       // Log the streaming access
-      console.log(`Encrypted file streamed: ${file.filename} by user ${userId}`);
       return;
       
     } catch (decryptError) {
@@ -460,6 +548,5 @@ const getAudioDuration = async (filePath) => {
   }
   
   // Fallback: Return 0 if ffmpeg is not available
-  console.warn('FFmpeg not available. Using default duration of 0.');
   return 0;
 };

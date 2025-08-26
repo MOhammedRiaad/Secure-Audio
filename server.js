@@ -174,11 +174,12 @@ const startServer = async () => {
     process.exit(1);
   }
 };
-// Export the Express app and startServer function
-module.exports = {
-  app,
-  startServer
-};
+// For Vercel serverless deployment
+module.exports = app;
+
+// Export the Express app and startServer function for local development
+module.exports.app = app;
+module.exports.startServer = startServer;
 
 // Only start the server if this file is run directly (not required)
 if (require.main === module) {

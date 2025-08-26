@@ -54,7 +54,10 @@ const uploadFields = multer({
     cb(null, true);
   },
   limits: {
-    fileSize: process.env.MAX_FILE_UPLOAD || 50 * 1024 * 1024, // Use env variable or 50MB default
+    fileSize: parseInt(process.env.MAX_FILE_UPLOAD) || 2 * 1024 * 1024 * 1024, // 2GB default for large audio files
+    fieldSize: 100 * 1024 * 1024, // 100MB for individual fields
+    files: 2, // Maximum 2 files (audio + cover)
+    parts: 8 // Maximum 5 parts (including text fields)
   }
 }).any(); // Use .any() instead of .fields() to be more flexible
 
