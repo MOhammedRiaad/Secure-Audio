@@ -28,23 +28,25 @@ info() {
 # Database configuration
 DB_NAME="secure_audio"
 DB_USER="secure_audio_user"
-
-# Generate secure password if not provided
-if [ -z "$DB_PASSWORD" ]; then
-    DB_PASSWORD=$(openssl rand -base64 32)
-    log "Generated database password: $DB_PASSWORD"
-    echo "IMPORTANT: Save this password for your .env file!"
-fi
+DB_PASSWORD="SecureAudio2024!@#"  # Static password for consistency
 
 log "Setting up PostgreSQL database..."
 
-# Create database and user
+# Create database and user (with error handling for existing resources)
 sudo -u postgres psql << EOF
--- Create database
-CREATE DATABASE $DB_NAME;
+-- Create database if it doesn't exist
+SELECT 'CREATE DATABASE $DB_NAME' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$DB_NAME')\gexec
 
--- Create user with password
-CREATE USER $DB_USER WITH ENCRYPTED PASSWORD '$DB_PASSWORD';
+-- Create user if it doesn't exist, or update password if it does
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$DB_USER') THEN
+        CREATE USER $DB_USER WITH ENCRYPTED PASSWORD '$DB_PASSWORD';
+    ELSE
+        ALTER USER $DB_USER WITH ENCRYPTED PASSWORD '$DB_PASSWORD';
+    END IF;
+END
+\$\$;
 
 -- Grant privileges
 GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;
@@ -71,12 +73,12 @@ cat > /home/ubuntu/.env.template << EOF
 # Database Configuration
 DATABASE_URL="postgresql://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME"
 
-# JWT Configuration (CHANGE THESE!)
+# JWT Configuration
 JWT_SECRET="$(openssl rand -base64 32)"
-JWT_EXPIRE="7d"
-JWT_COOKIE_EXPIRE=7
+JWT_EXPIRE="1d"
+JWT_COOKIE_EXPIRE=1
 
-# Security Keys (CHANGE THESE!)
+# Security Keys
 DRM_SECRET_KEY="$(openssl rand -base64 32)"
 ENCRYPTION_KEY="$(openssl rand -base64 32)"
 SESSION_SECRET="$(openssl rand -base64 32)"
@@ -84,7 +86,7 @@ SESSION_SECRET="$(openssl rand -base64 32)"
 # Application Configuration
 NODE_ENV=production
 PORT=5000
-CORS_ORIGIN="https://yourdomain.com,http://yourdomain.com"
+CORS_ORIGIN="https://ahmedabulella.space,http://ahmedabulella.space"
 
 # File Upload
 MAX_FILE_SIZE=104857600

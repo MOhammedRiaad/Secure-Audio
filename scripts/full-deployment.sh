@@ -115,13 +115,26 @@ log "Configuring PostgreSQL database..."
 if [ -f "/var/www/secure-audio/scripts/setup-database.sh" ]; then
     bash /var/www/secure-audio/scripts/setup-database.sh
 else
-    # Inline database setup
-    DB_PASSWORD=$(openssl rand -base64 32)
-    log "Generated database password: $DB_PASSWORD"
+    # Inline database setup with static password
+    DB_PASSWORD="SecureAudio2024!@#"
+    log "Using static database password for consistency"
     
     sudo -u postgres psql << EOF
-CREATE DATABASE secure_audio;
-CREATE USER secure_audio_user WITH ENCRYPTED PASSWORD '$DB_PASSWORD';
+-- Create database if it doesn't exist
+SELECT 'CREATE DATABASE secure_audio' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'secure_audio')\gexec
+
+-- Create user if it doesn't exist, or update password if it does
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'secure_audio_user') THEN
+        CREATE USER secure_audio_user WITH ENCRYPTED PASSWORD '$DB_PASSWORD';
+    ELSE
+        ALTER USER secure_audio_user WITH ENCRYPTED PASSWORD '$DB_PASSWORD';
+    END IF;
+END
+\$\$;
+
+-- Grant privileges
 GRANT ALL PRIVILEGES ON DATABASE secure_audio TO secure_audio_user;
 ALTER USER secure_audio_user CREATEDB;
 \q
