@@ -61,7 +61,17 @@ exports.getAudioFiles = asyncHandler(async (req, res, next) => {
   
   const files = await prisma.audioFile.findMany({
     where: whereClause,
-    include: {
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      duration: true,
+      fileSize: true,
+      isPublic: true,
+      coverImagePath: true,
+      coverImageBase64: true,
+      createdAt: true,
+      updatedAt: true,
       checkpoints: {
         where: {
           userId: req.user.id
@@ -73,6 +83,16 @@ exports.getAudioFiles = asyncHandler(async (req, res, next) => {
       chapters: {
         orderBy: {
           order: 'asc'
+        },
+        select: {
+          id: true,
+          label: true,
+          startTime: true,
+          endTime: true,
+          order: true,
+          status: true,
+          createdAt: true,
+          finalizedAt: true
         }
       }
     }
@@ -103,9 +123,22 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
     await prisma.$queryRaw`SELECT 1 as test`;
     console.log('Database connection test passed');
     
-    // Try a simpler query first
+    // Try a simpler query first with only safe fields
     const file = await prisma.audioFile.findUnique({
-      where: { id: fileId }
+      where: { id: fileId },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        duration: true,
+        fileSize: true,
+        isPublic: true,
+        coverImagePath: true,
+        coverImageBase64: true,
+        createdAt: true,
+        updatedAt: true
+        // Exclude encryptedPath, encryptionKey, and other sensitive fields
+      }
     });
     
     if (file) {
@@ -137,12 +170,9 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
             endTime: true,
             order: true,
             status: true,
-            encryptedPath: true,
-            plainSize: true,
-            encryptedSize: true,
             createdAt: true,
             finalizedAt: true
-            // Exclude encryptedData to avoid binary data conversion issues
+            // Exclude encryptedData, encryptedPath, and size data for security
           }
         });
         file.chapters = chapters;
