@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Secure-Audio Application Deployment Script
-# This script deploys or updates the Secure-Audio application
+# Safe Deployment Script for Secure-Audio
+# This script avoids the hanging issue by using a safer approach
 
 set -e
 
@@ -33,55 +33,71 @@ warning() {
 APP_DIR="/var/www/secure-audio"
 REPO_URL="https://github.com/MOhammedRiaad/Secure-Audio.git"
 BRANCH="main"
+TEMP_DIR="/tmp/secure-audio-deploy-$(date +%s)"
+
+log "Starting safe deployment process..."
+
+# Create temporary directory for deployment
+log "Creating temporary deployment directory..."
+mkdir -p $TEMP_DIR
+cd $TEMP_DIR
+
+# Clone repository to temp directory
+log "Cloning repository to temporary location..."
+git clone $REPO_URL .
 
 # Check if this is initial deployment or update
 if [ -d "$APP_DIR/.git" ]; then
     DEPLOYMENT_TYPE="update"
     log "Detected existing installation - performing update..."
+    
+    # Stop application first
+    log "Stopping application..."
+    pm2 stop secure-audio-api || true
+    
+    # Backup current .env file
+    if [ -f "$APP_DIR/.env" ]; then
+        log "Backing up current .env file..."
+        cp "$APP_DIR/.env" "$TEMP_DIR/.env.backup"
+    fi
+    
+    # Remove old application directory (safely)
+    log "Removing old application files..."
+    sudo rm -rf $APP_DIR
+    
 else
     DEPLOYMENT_TYPE="initial"
     log "Performing initial deployment..."
 fi
 
-if [ "$DEPLOYMENT_TYPE" = "initial" ]; then
-    # Initial deployment
-    log "Cloning repository..."
-    if [ "$(ls -A $APP_DIR)" ]; then
-        warning "Directory not empty, backing up and clearing..."
-        # Create backup directory
-        BACKUP_DIR="/tmp/secure-audio-backup-$(date +%s)"
-        mkdir -p $BACKUP_DIR
-        
-        # Move existing files to backup (safer than rm -rf)
-        mv $APP_DIR/* $BACKUP_DIR/ 2>/dev/null || true
-        mv $APP_DIR/.[^.]* $BACKUP_DIR/ 2>/dev/null || true
-        
-        log "Existing files backed up to $BACKUP_DIR"
+# Create application directory
+log "Creating application directory..."
+sudo mkdir -p $APP_DIR
+sudo chown ubuntu:ubuntu $APP_DIR
+
+# Move files from temp to app directory
+log "Moving application files..."
+cp -r $TEMP_DIR/* $APP_DIR/
+cp -r $TEMP_DIR/.[^.]* $APP_DIR/ 2>/dev/null || true
+
+# Navigate to app directory
+cd $APP_DIR
+
+# Restore .env file if it was backed up
+if [ -f "$TEMP_DIR/.env.backup" ]; then
+    log "Restoring .env file..."
+    cp "$TEMP_DIR/.env.backup" .env
+fi
+
+# Check if .env file exists
+if [ ! -f ".env" ]; then
+    if [ -f "/home/ubuntu/.env.template" ]; then
+        log "Copying environment template..."
+        cp /home/ubuntu/.env.template .env
+        warning "Please update .env file with your domain and verify all settings!"
+    else
+        error ".env file not found! Please create it or run setup-database.sh first."
     fi
-    
-    # Clone repository
-    git clone $REPO_URL $APP_DIR
-    cd $APP_DIR
-    
-    # Check if .env file exists
-    if [ ! -f ".env" ]; then
-        if [ -f "/home/ubuntu/.env.template" ]; then
-            log "Copying environment template..."
-            cp /home/ubuntu/.env.template .env
-            warning "Please update .env file with your domain and verify all settings!"
-        else
-            error ".env file not found! Please create it or run setup-database.sh first."
-        fi
-    fi
-else
-    # Update deployment
-    cd $APP_DIR
-    log "Stopping application..."
-    pm2 stop secure-audio-api || true
-    
-    log "Pulling latest changes..."
-    git fetch origin
-    git reset --hard origin/$BRANCH
 fi
 
 # Install backend dependencies
@@ -160,6 +176,10 @@ else
     log "Restarting application..."
     pm2 restart secure-audio-api
 fi
+
+# Clean up temporary directory
+log "Cleaning up temporary files..."
+rm -rf $TEMP_DIR
 
 # Verify application is running
 sleep 5
