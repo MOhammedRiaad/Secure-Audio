@@ -203,12 +203,16 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         
         // Setup event listeners for the audio element
         audioRef.current.addEventListener('loadedmetadata', () => {
-          setDuration(audioRef.current.duration || 0);
-          console.log('✅ DRM audio metadata loaded, duration:', audioRef.current.duration);
+          if (audioRef.current) {
+            setDuration(audioRef.current.duration || 0);
+            console.log('✅ DRM audio metadata loaded, duration:', audioRef.current.duration);
+          }
         });
         
         audioRef.current.addEventListener('timeupdate', () => {
-          setCurrentTime(audioRef.current.currentTime || 0);
+          if (audioRef.current) {
+            setCurrentTime(audioRef.current.currentTime || 0);
+          }
         });
         
         audioRef.current.addEventListener('ended', () => {
@@ -254,7 +258,9 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       };
       
       const handleTimeUpdate = () => {
-        setCurrentTime(audio.currentTime);
+        if (audio && audio.currentTime !== undefined) {
+          setCurrentTime(audio.currentTime);
+        }
       };
       
       const handlePlay = () => setIsPlaying(true);
