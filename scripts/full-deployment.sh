@@ -131,8 +131,8 @@ EOF
     cat > /var/www/secure-audio/.env << EOF
 DATABASE_URL="postgresql://secure_audio_user:$DB_PASSWORD@localhost:5432/secure_audio"
 JWT_SECRET="$(openssl rand -base64 32)"
-JWT_EXPIRE="7d"
-JWT_COOKIE_EXPIRE=7
+JWT_EXPIRE="1d"
+JWT_COOKIE_EXPIRE=1
 DRM_SECRET_KEY="$(openssl rand -base64 32)"
 ENCRYPTION_KEY="$(openssl rand -base64 32)"
 SESSION_SECRET="$(openssl rand -base64 32)"
@@ -159,6 +159,11 @@ else
     cd /var/www/secure-audio
     
     if [ ! -d ".git" ]; then
+        if [ "$(ls -A .)" ]; then
+            warning "Directory not empty, removing existing files..."
+            rm -rf ./*
+            rm -rf ./.[^.]*
+        fi
         git clone $REPO_URL .
     fi
     

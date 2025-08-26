@@ -121,12 +121,12 @@ Before running scripts, you may need to update:
 
 1. **Repository URL** in `deploy-app.sh`:
    ```bash
-   REPO_URL="https://github.com/yourusername/secure-audio.git"
+   REPO_URL="https://github.com/MOhammedRiaad/Secure-Audio.git"
    ```
 
 2. **Domain name** when prompted or via environment variable:
    ```bash
-   export DOMAIN=yourdomain.com
+   export DOMAIN=ahmedabulella.space
    ```
 
 ## 🔍 Monitoring
