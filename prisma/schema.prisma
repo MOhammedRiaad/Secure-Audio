@@ -45,6 +45,7 @@ model AudioFile {
   isEncrypted   Boolean      @default(false)
   encryptionKey String?
   encryptionIV  String?
+  encryptionTag String?      @map("encryption_tag")
   coverImagePath String?     @map("cover_image_path")
   coverImageBase64 String?   @map("cover_image_base64")
   coverImageMimeType String? @map("cover_image_mime_type")
@@ -84,14 +85,23 @@ model Checkpoint {
 }
 
 model AudioChapter {
-  id        Int       @id @default(autoincrement())
-  fileId    Int
-  label     String
-  startTime Float
-  endTime   Float?
-  order     Int
-  createdAt DateTime  @default(now())
-  audioFile AudioFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  id            Int       @id @default(autoincrement())
+  fileId        Int
+  label         String
+  startTime     Float
+  endTime       Float?
+  order         Int
+  status        ChapterStatus @default(pending)
+  encryptionKey String?   @map("encryption_key")
+  encryptionIV  String?   @map("encryption_iv")
+  encryptionTag String?   @map("encryption_tag")
+  encryptedData Bytes?    @map("encrypted_data")
+  encryptedPath String?   @map("encrypted_path")
+  plainSize     Int?      @map("plain_size")
+  encryptedSize Int?      @map("encrypted_size")
+  createdAt     DateTime  @default(now())
+  finalizedAt   DateTime? @map("finalized_at")
+  audioFile     AudioFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
 
   @@unique([fileId, order])
 }
@@ -133,4 +143,10 @@ model DeviceNotification {
 enum Role {
   user
   admin
+}
+
+enum ChapterStatus {
+  pending
+  ready
+  failed
 }

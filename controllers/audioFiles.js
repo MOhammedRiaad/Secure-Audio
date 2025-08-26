@@ -19,7 +19,17 @@ try {
   console.warn('FFmpeg not available. Audio duration detection will be limited.');
 }
 
-const prisma = new PrismaClient();
+// Create a fresh Prisma client instance
+const prisma = new PrismaClient({
+  log: ['query', 'info', 'warn', 'error'],
+  errorFormat: 'minimal'
+});
+
+// Handle Prisma client connection
+prisma.$connect().catch(err => {
+  console.error('Failed to connect to database:', err);
+});
+
 const drm = new AudioDRM();
 
 // @desc    Get all audio files (with access)
@@ -79,46 +89,100 @@ exports.getAudioFiles = asyncHandler(async (req, res, next) => {
 // @route   GET /api/v1/files/:id
 // @access  Private
 exports.getAudioFile = asyncHandler(async (req, res, next) => {
-  const file = await prisma.audioFile.findUnique({
-    where: { id: parseInt(req.params.id) },
-    include: {
-      checkpoints: {
-        where: {
-          userId: req.user.id
-        },
-        orderBy: {
-          timestamp: 'asc'
-        }
-      },
-      chapters: {
-        orderBy: {
-          order: 'asc'
-        }
+  const fileId = parseInt(req.params.id);
+  
+  // Validate fileId
+  if (isNaN(fileId) || fileId <= 0) {
+    return next(new ErrorResponse('Invalid file ID', 400));
+  }
+
+  try {
+    console.log(`Fetching audio file with ID: ${fileId} (type: ${typeof fileId})`);
+    
+    // Test basic connectivity first
+    await prisma.$queryRaw`SELECT 1 as test`;
+    console.log('Database connection test passed');
+    
+    // Try a simpler query first
+    const file = await prisma.audioFile.findUnique({
+      where: { id: fileId }
+    });
+    
+    if (file) {
+      // If basic query works, try to get related data separately
+      try {
+        const checkpoints = await prisma.checkpoint.findMany({
+          where: {
+            fileId: fileId,
+            userId: req.user.id
+          },
+          orderBy: {
+            timestamp: 'asc'
+          }
+        });
+        file.checkpoints = checkpoints;
+      } catch (checkpointError) {
+        console.warn('Failed to fetch checkpoints:', checkpointError.message);
+        file.checkpoints = [];
+      }
+      
+      try {
+        const chapters = await prisma.audioChapter.findMany({
+          where: { fileId: fileId },
+          orderBy: { order: 'asc' },
+          select: {
+            id: true,
+            label: true,
+            startTime: true,
+            endTime: true,
+            order: true,
+            status: true,
+            encryptedPath: true,
+            plainSize: true,
+            encryptedSize: true,
+            createdAt: true,
+            finalizedAt: true
+            // Exclude encryptedData to avoid binary data conversion issues
+          }
+        });
+        file.chapters = chapters;
+      } catch (chapterError) {
+        console.warn('Failed to fetch chapters (likely corrupted data):', chapterError.message);
+        file.chapters = [];
       }
     }
-  });
 
-  if (!file) {
-    return next(
-      new ErrorResponse(`File not found with id of ${req.params.id}`, 404)
-    );
-  }
-
-  // Check if user has access (admins have access to all files)
-  if (req.user.role !== 'admin') {
-    const hasAccess = await checkFileAccess(req.user.id, file.id);
-    
-    if (!hasAccess && !file.isPublic) {
+    if (!file) {
       return next(
-        new ErrorResponse(`Not authorized to access this file`, 403)
+        new ErrorResponse(`File not found with id of ${fileId}`, 404)
       );
     }
-  }
 
-  res.status(200).json({
-    success: true,
-    data: file
-  });
+    // Check if user has access (admins have access to all files)
+    if (req.user.role !== 'admin') {
+      const hasAccess = await checkFileAccess(req.user.id, file.id);
+      
+      if (!hasAccess && !file.isPublic) {
+        return next(
+          new ErrorResponse(`Not authorized to access this file`, 403)
+        );
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: file
+    });
+  } catch (error) {
+    console.error('Error fetching audio file:', {
+      message: error.message,
+      code: error.code,
+      name: error.name,
+      fileId: fileId,
+      fileIdType: typeof fileId
+    });
+    return next(new ErrorResponse(`Failed to fetch audio file: ${error.message}`, 500));
+  }
 });
 
 // @desc    Upload audio file
@@ -196,6 +260,7 @@ exports.uploadAudioFile = asyncHandler(async (req, res, next) => {
         isEncrypted: true,
         encryptionKey: encryptionResult.key,
         encryptionIV: encryptionResult.iv,
+        encryptionTag: encryptionResult.authTag,
         coverImagePath,
         coverImageBase64,
         coverImageMimeType

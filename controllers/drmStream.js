@@ -63,9 +63,22 @@ exports.generateDRMSession = asyncHandler(async (req, res, next) => {
 exports.streamDRMProtectedAudio = asyncHandler(async (req, res, next) => {
   const { sessionToken } = req.params;
   
+  console.log('🔐 DRM Stream request received:', {
+    sessionToken: sessionToken ? `${sessionToken.substring(0, 20)}...` : 'none',
+    userAgent: req.headers['user-agent'],
+    origin: req.headers.origin
+  });
+  
   try {
     // Validate session
     const session = drm.validateSecureSession(sessionToken);
+    
+    console.log('✅ DRM Session validated:', {
+      fileId: session.fileId,
+      userId: session.userId,
+      sessionId: session.sessionId,
+      expiry: new Date(session.expiry).toISOString()
+    });
     
     // Get file information
     const file = await prisma.audioFile.findUnique({
@@ -73,6 +86,7 @@ exports.streamDRMProtectedAudio = asyncHandler(async (req, res, next) => {
     });
     
     if (!file) {
+      console.error('❌ File not found for DRM session:', session.fileId);
       return next(new ErrorResponse('File not found', 404));
     }
     
@@ -80,8 +94,15 @@ exports.streamDRMProtectedAudio = asyncHandler(async (req, res, next) => {
     
     // Check if file exists
     if (!fs.existsSync(filePath)) {
+      console.error('❌ File not found on disk:', filePath);
       return next(new ErrorResponse('File not found on disk', 404));
     }
+    
+    console.log('📁 Streaming file:', {
+      filename: file.filename,
+      isEncrypted: file.isEncrypted,
+      path: filePath
+    });
     
     // Set security headers to prevent download/caching
     res.setHeader('Content-Type', 'audio/mpeg');
@@ -100,6 +121,8 @@ exports.streamDRMProtectedAudio = asyncHandler(async (req, res, next) => {
     // Handle encrypted files
     if (file.isEncrypted && file.encryptionKey && file.encryptionIV) {
       try {
+        console.log('🔓 Creating decrypted stream for encrypted file');
+        
         // Create a decrypted stream for encrypted files
         const decryptedStream = drm.createDecryptedStream(filePath, {
           key: file.encryptionKey,
@@ -113,11 +136,11 @@ exports.streamDRMProtectedAudio = asyncHandler(async (req, res, next) => {
         // Stream the decrypted content
         decryptedStream.pipe(res);
         
-        console.log(`Encrypted file streamed: ${file.filename} by user ${session.userId}`);
+        console.log(`✅ Encrypted file streamed: ${file.filename} by user ${session.userId}`);
         return;
         
       } catch (decryptError) {
-        console.error('Decryption error:', decryptError);
+        console.error('❌ Decryption error:', decryptError);
         return next(new ErrorResponse('Error decrypting file', 500));
       }
     }
@@ -150,7 +173,35 @@ exports.streamDRMProtectedAudio = asyncHandler(async (req, res, next) => {
     }
     
   } catch (error) {
-    return next(new ErrorResponse('Invalid or expired session', 403));
+    console.error('❌ DRM Stream error:', {
+      error: error.message,
+      sessionToken: sessionToken ? `${sessionToken.substring(0, 20)}...` : 'none'
+    });
+    
+    // Check if it's a session expiry issue
+    if (error.message.includes('Session expired') || error.message.includes('expired')) {
+      console.warn('⏰ DRM Session expired, returning 403');
+      return res.status(403).json({ 
+        error: 'DRM session expired. Please refresh and try again.',
+        code: 'SESSION_EXPIRED'
+      });
+    }
+    
+    // Check if it's an invalid session token
+    if (error.message.includes('Invalid session token')) {
+      console.warn('🔑 Invalid DRM session token, returning 403');
+      return res.status(403).json({ 
+        error: 'Invalid DRM session. Please refresh and try again.',
+        code: 'INVALID_SESSION'
+      });
+    }
+    
+    // Generic session validation failure
+    console.warn('🚫 DRM Session validation failed, returning 403');
+    return res.status(403).json({ 
+      error: 'DRM session validation failed. Please refresh and try again.',
+      code: 'SESSION_VALIDATION_FAILED'
+    });
   }
 });
 

@@ -2,16 +2,23 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const ALGORITHM = 'aes-256-cbc';
-const IV_LENGTH = 16;
+const ALGORITHM = 'aes-256-gcm';
+const IV_LENGTH = 12; // 96-bit IV for GCM
+const TAG_LENGTH = 16; // 128-bit authentication tag
 const CHUNK_SIZE = 64 * 1024; // 64KB chunks
 
 class AudioDRM {
   constructor() {
-    this.encryptionKey = process.env.STREAM_TOKEN_SECRET;
+    this.encryptionKey = process.env.STREAM_TOKEN_SECRET || process.env.JWT_SECRET;
     if (!this.encryptionKey) {
       throw new Error('DRM encryption key not configured');
     }
+    
+    // Ensure we have a 32-byte key for AES-256
+    this.encryptionKeyBuffer = crypto.createHash('sha256').update(this.encryptionKey).digest();
+    this.encryptionKeyHex = this.encryptionKeyBuffer.toString('hex');
+    
+    console.log('🔐 DRM initialized with key length:', this.encryptionKeyHex.length, 'chars');
   }
 
   // Generate a unique file encryption key
@@ -30,7 +37,7 @@ class AudioDRM {
       const output = fs.createWriteStream(outputPath);
       
       // Write metadata header (IV + encrypted file key)
-      const encryptedFileKey = this.encryptData(fileKey, this.encryptionKey);
+      const encryptedFileKey = this.encryptData(fileKey);
       const header = Buffer.concat([
         Buffer.from('SADRM', 'utf8'), // Magic bytes
         Buffer.from([1]), // Version
@@ -100,7 +107,7 @@ class AudioDRM {
           
           // Decrypt file key
           try {
-            const decryptedKey = this.decryptData(encryptedFileKey, this.encryptionKey);
+            const decryptedKey = this.decryptData(encryptedFileKey);
             fileKey = Buffer.from(decryptedKey, 'hex');
           } catch (error) {
             return reject(new Error('Failed to decrypt file key'));
@@ -161,22 +168,43 @@ class AudioDRM {
   }
 
   // Helper method to encrypt data
-  encryptData(data, key) {
+  encryptData(data, key = null) {
+    const keyToUse = key || this.encryptionKeyHex;
     const iv = crypto.randomBytes(IV_LENGTH);
-    const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(key, 'hex'), iv);
+    const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(keyToUse, 'hex'), iv);
+    
     let encrypted = cipher.update(data, 'utf8', 'hex');
     encrypted += cipher.final('hex');
-    return `${iv.toString('hex')}:${encrypted}`;
+    const authTag = cipher.getAuthTag();
+    
+    return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
   }
 
   // Helper method to decrypt data
-  decryptData(encryptedData, key) {
-    const [ivString, encrypted] = encryptedData.split(':');
-    const iv = Buffer.from(ivString, 'hex');
-    const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), iv);
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
+  decryptData(encryptedData, key = null) {
+    try {
+      const keyToUse = key || this.encryptionKeyHex;
+      const parts = encryptedData.split(':');
+      
+      if (parts.length !== 3) {
+        throw new Error('Invalid encrypted data format');
+      }
+      
+      const [ivString, authTagString, encrypted] = parts;
+      const iv = Buffer.from(ivString, 'hex');
+      const authTag = Buffer.from(authTagString, 'hex');
+      
+      const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(keyToUse, 'hex'), iv);
+      decipher.setAuthTag(authTag);
+      
+      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      
+      return decrypted;
+    } catch (error) {
+      console.error('🚨 DRM decryption error:', error.message);
+      throw new Error('Failed to decrypt DRM data');
+    }
   }
 
   // Generate secure streaming session
@@ -189,21 +217,52 @@ class AudioDRM {
       expiry: Date.now() + (30 * 60 * 1000) // 30 minutes
     };
     
-    return this.encryptData(JSON.stringify(sessionData), this.encryptionKey);
+    console.log('🔐 Generating DRM session:', {
+      fileId,
+      userId,
+      sessionId: sessionData.sessionId,
+      expiry: new Date(sessionData.expiry).toISOString()
+    });
+    
+    return this.encryptData(JSON.stringify(sessionData));
   }
 
   // Validate secure session
   validateSecureSession(sessionToken) {
     try {
-      const decrypted = this.decryptData(sessionToken, this.encryptionKey);
+      console.log('🔍 Validating DRM session token:', sessionToken ? `${sessionToken.substring(0, 30)}...` : 'none');
+      
+      const decrypted = this.decryptData(sessionToken);
       const sessionData = JSON.parse(decrypted);
       
+      console.log('✅ DRM session decrypted successfully:', {
+        fileId: sessionData.fileId,
+        userId: sessionData.userId,
+        sessionId: sessionData.sessionId,
+        expiry: new Date(sessionData.expiry).toISOString(),
+        isExpired: Date.now() > sessionData.expiry
+      });
+      
       if (Date.now() > sessionData.expiry) {
+        console.warn('⏰ DRM session expired:', {
+          now: new Date().toISOString(),
+          expiry: new Date(sessionData.expiry).toISOString(),
+          expiredBy: (Date.now() - sessionData.expiry) / 1000 + ' seconds'
+        });
         throw new Error('Session expired');
       }
       
       return sessionData;
     } catch (error) {
+      console.error('❌ DRM session validation failed:', {
+        error: error.message,
+        sessionToken: sessionToken ? `${sessionToken.substring(0, 30)}...` : 'none'
+      });
+      
+      if (error.message.includes('Session expired')) {
+        throw new Error('Session expired');
+      }
+      
       throw new Error('Invalid session token');
     }
   }
@@ -268,25 +327,31 @@ class AudioDRM {
     }
   }
 
-  // Encrypt audio file at rest
+  // Encrypt audio file at rest with AES-256-GCM
   async encryptAudioFile(inputPath, outputPath) {
     try {
       // Generate unique encryption key and IV for this file
       const key = crypto.randomBytes(32).toString('hex');
-      const iv = crypto.randomBytes(16).toString('hex');
+      const iv = crypto.randomBytes(IV_LENGTH).toString('hex');
       
       // Read the input file
       const inputData = fs.readFileSync(inputPath);
       
-      // Encrypt the file data
-      const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(key, 'hex'), Buffer.from(iv, 'hex'));
-      cipher.setAutoPadding(true);
+      // Encrypt the file data using GCM
+      const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(key, 'hex'), Buffer.from(iv, 'hex'));
       
       let encrypted = cipher.update(inputData);
-      encrypted = Buffer.concat([encrypted, cipher.final()]);
+      const finalChunk = cipher.final();
+      const authTag = cipher.getAuthTag();
       
-      // Prepend IV to encrypted data
-      const result = Buffer.concat([Buffer.from(iv, 'hex'), encrypted]);
+      encrypted = Buffer.concat([encrypted, finalChunk]);
+      
+      // Prepend IV and auth tag to encrypted data
+      const result = Buffer.concat([
+        Buffer.from(iv, 'hex'),
+        authTag,
+        encrypted
+      ]);
       
       // Write encrypted file
       fs.writeFileSync(outputPath, result);
@@ -294,6 +359,7 @@ class AudioDRM {
       return {
         key,
         iv,
+        authTag: authTag.toString('hex'),
         encryptedPath: outputPath
       };
       
@@ -303,7 +369,7 @@ class AudioDRM {
     }
   }
 
-  // Create decrypted stream for encrypted files
+  // Create decrypted stream for encrypted files (GCM format)
   createDecryptedStream(encryptedFilePath, options) {
     try {
       const { key } = options;
@@ -313,15 +379,16 @@ class AudioDRM {
       const decryptTransform = new Transform({
         transform(chunk, encoding, callback) {
           try {
-            // For the first chunk, extract the IV (first 16 bytes)
-            if (!this.ivExtracted) {
-              this.fileIV = chunk.slice(0, 16);
-              chunk = chunk.slice(16);
-              this.ivExtracted = true;
+            // For the first chunk, extract the IV and auth tag
+            if (!this.headerExtracted) {
+              this.fileIV = chunk.slice(0, IV_LENGTH);
+              this.authTag = chunk.slice(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
+              chunk = chunk.slice(IV_LENGTH + TAG_LENGTH);
+              this.headerExtracted = true;
               
               // Initialize decipher with the IV from the file
-              this.decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(key, 'hex'), this.fileIV);
-              this.decipher.setAutoPadding(true);
+              this.decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), this.fileIV);
+              this.decipher.setAuthTag(this.authTag);
             }
             
             // Decrypt the chunk
@@ -415,6 +482,117 @@ class AudioDRM {
       console.error('FFmpeg decrypted stream creation error:', error);
       throw new Error('Failed to create FFmpeg decrypted stream with seek');
     }
+  }
+
+  // Encrypt individual chapter segment with AES-256-GCM
+  encryptChapterSegment(audioBuffer) {
+    try {
+      const key = crypto.randomBytes(32);
+      const iv = crypto.randomBytes(IV_LENGTH);
+      
+      const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+      
+      let encrypted = cipher.update(audioBuffer);
+      const finalChunk = cipher.final();
+      const authTag = cipher.getAuthTag();
+      
+      encrypted = Buffer.concat([encrypted, finalChunk]);
+      
+      return {
+        key: key.toString('hex'),
+        iv: iv.toString('hex'),
+        authTag: authTag.toString('hex'),
+        encryptedData: encrypted,
+        plainSize: audioBuffer.length,
+        encryptedSize: encrypted.length
+      };
+      
+    } catch (error) {
+      console.error('Chapter encryption error:', error);
+      throw new Error('Failed to encrypt chapter segment');
+    }
+  }
+
+  // Decrypt individual chapter segment
+  decryptChapterSegment(encryptedData, key, iv, authTag) {
+    try {
+      const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), Buffer.from(iv, 'hex'));
+      decipher.setAuthTag(Buffer.from(authTag, 'hex'));
+      
+      let decrypted = decipher.update(encryptedData);
+      decrypted = Buffer.concat([decrypted, decipher.final()]);
+      
+      return decrypted;
+      
+    } catch (error) {
+      console.error('Chapter decryption error:', error);
+      throw new Error('Failed to decrypt chapter segment');
+    }
+  }
+
+  // Extract audio segment from master file using FFmpeg
+  async extractAudioSegment(masterFilePath, startTime, endTime, masterKey) {
+    return new Promise((resolve, reject) => {
+      const { spawn } = require('child_process');
+      const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+      
+      // Create a temporary decrypted stream of the master file
+      const decryptedStream = this.createDecryptedStream(masterFilePath, { key: masterKey });
+      
+      // Calculate duration
+      const duration = endTime ? endTime - startTime : null;
+      
+      // FFmpeg arguments for extraction
+      const args = [
+        '-f', 'mp3',
+        '-i', 'pipe:0',  // Read from stdin
+        '-ss', startTime.toString(),
+        ...(duration ? ['-t', duration.toString()] : []),
+        '-c', 'copy',  // Copy without re-encoding when possible
+        '-f', 'mp3',
+        'pipe:1'  // Output to stdout
+      ];
+      
+      const ffmpeg = spawn(ffmpegPath, args, {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+      
+      const chunks = [];
+      let errorOutput = '';
+      
+      // Pipe decrypted master file to FFmpeg
+      decryptedStream.pipe(ffmpeg.stdin);
+      
+      // Collect output chunks
+      ffmpeg.stdout.on('data', (chunk) => {
+        chunks.push(chunk);
+      });
+      
+      ffmpeg.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+      });
+      
+      ffmpeg.on('close', (code) => {
+        if (code === 0) {
+          const segmentBuffer = Buffer.concat(chunks);
+          resolve(segmentBuffer);
+        } else {
+          console.error('FFmpeg error:', errorOutput);
+          reject(new Error(`FFmpeg exited with code ${code}`));
+        }
+      });
+      
+      ffmpeg.on('error', (error) => {
+        console.error('FFmpeg spawn error:', error);
+        reject(error);
+      });
+      
+      decryptedStream.on('error', (error) => {
+        console.error('Decryption stream error:', error);
+        ffmpeg.kill();
+        reject(error);
+      });
+    });
   }
 }
 

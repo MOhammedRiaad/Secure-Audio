@@ -18,11 +18,12 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
   const { token, loading } = useAuth();
   
   // Initialize DRM only when needed for regular playback
-  const initializeDRM = useCallback(async () => {
+  const initializeDRM = useCallback(async (retryCount = 0) => {
     if (!fileId || !token) {
       return;
     }
 
+    console.log(`🔄 Initializing DRM (attempt ${retryCount + 1}/3)...`);
     setIsLoading(true);
     setError(null);
     
@@ -34,21 +35,41 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         chunkedStreaming: true
       });
       
+      console.log('✅ DRM status retrieved successfully');
+      
       // Generate secure session
       const sessionResponse = await api.post(`/drm/session/${fileId}`, {});
       
       setSessionToken(sessionResponse.data.data.sessionToken);
       setDuration(sessionResponse.data.data.duration || 0);
       
+      console.log('✅ DRM session initialized successfully:', {
+        fileId,
+        duration: sessionResponse.data.data.duration,
+        sessionToken: sessionResponse.data.data.sessionToken ? 'received' : 'none'
+      });
+      
     } catch (error) {
+      console.error(`🚨 DRM initialization failed (attempt ${retryCount + 1}):`, error);
       
       let errorMessage = 'Failed to initialize secure playback';
+      
       if (error.response?.status === 401) {
         errorMessage = 'Authentication required. Please log in again.';
       } else if (error.response?.status === 403) {
         errorMessage = 'Access denied. You do not have permission to access this file.';
       } else if (error.response?.status === 404) {
         errorMessage = 'Audio file not found.';
+      } else if (error.response?.status >= 500) {
+        // Server error - retry might help
+        if (retryCount < 2) {
+          console.log(`🔄 Server error, retrying in 2 seconds... (attempt ${retryCount + 2}/3)`);
+          setTimeout(() => {
+            initializeDRM(retryCount + 1);
+          }, 2000);
+          return;
+        }
+        errorMessage = 'Server error. Please try again later.';
       } else {
         errorMessage = `Failed to initialize secure playback: ${error.response?.data?.message || error.message}`;
       }
@@ -125,19 +146,65 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       const streamUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000/api/v1'}/drm/stream/${sessionToken}`;
       const correctedStreamUrl = streamUrl.replace('/api/v1/api/v1', '/api/v1');
       
+      console.log('🔐 Setting up DRM audio streaming:', {
+        sessionToken: sessionToken ? `${sessionToken.substring(0, 20)}...` : 'none',
+        streamUrl: correctedStreamUrl
+      });
+      
       if (audioRef.current) {
         audioRef.current.src = correctedStreamUrl;
         audioRef.current.crossOrigin = 'use-credentials';
         audioRef.current.load();
         
-        // Add error handling for audio loading
-        audioRef.current.addEventListener('error', (e) => {
+        // Enhanced error handling for audio loading
+        const handleAudioError = async (e) => {
+          if (!audioRef.current) {
+            console.error('🚨 Audio error: audioRef is null');
+            setError('Audio player not available');
+            return;
+          }
+
+          console.error('🚨 Audio loading error:', {
+            error: audioRef.current.error,
+            code: audioRef.current.error?.code,
+            message: audioRef.current.error?.message,
+            networkState: audioRef.current.networkState,
+            readyState: audioRef.current.readyState
+          });
+          
+          // Check if it's a network error that might indicate session expiry
+          if (audioRef.current.error?.code === 4) { // MEDIA_ERR_SRC_NOT_SUPPORTED
+            console.warn('⚠️ Possible DRM session expiry detected, attempting to reinitialize...');
+            
+            try {
+              // Try to fetch from the stream URL to check the specific error
+              const response = await fetch(correctedStreamUrl, {
+                method: 'HEAD',
+                credentials: 'include'
+              });
+              
+              if (response.status === 403) {
+                console.log('✅ Confirmed: DRM session expired (403), reinitializing...');
+                // Clear current session and reinitialize
+                setSessionToken(null);
+                setUsingSignedUrl(false);
+                await initializeDRM();
+                return;
+              }
+            } catch (fetchError) {
+              console.error('Failed to check stream URL:', fetchError);
+            }
+          }
+          
           setError(`Audio loading failed: ${audioRef.current.error?.message || 'Unknown error'}`);
-        });
+        };
+        
+        audioRef.current.addEventListener('error', handleAudioError);
         
         // Setup event listeners for the audio element
         audioRef.current.addEventListener('loadedmetadata', () => {
           setDuration(audioRef.current.duration || 0);
+          console.log('✅ DRM audio metadata loaded, duration:', audioRef.current.duration);
         });
         
         audioRef.current.addEventListener('timeupdate', () => {
@@ -147,9 +214,14 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         audioRef.current.addEventListener('ended', () => {
           setIsPlaying(false);
         });
+        
+        audioRef.current.addEventListener('canplay', () => {
+          console.log('✅ DRM audio ready to play');
+        });
       }
       
     } catch (error) {
+      console.error('🚨 Failed to setup secure audio streaming:', error);
       setError('Failed to setup secure audio streaming');
     }
   };
@@ -258,7 +330,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
           // Get the real URL from the attribute since src property is obfuscated
           const realUrl = audio.getAttribute('src') || '';
           // Continuously monitor for unauthorized access attempts
-          if (realUrl && !realUrl.includes('/drm/stream/') && !realUrl.includes('/stream-signed') && !realUrl.includes('blob:')) {
+          if (realUrl && !realUrl.includes('/drm/stream/') && !realUrl.includes('/stream-signed') && !realUrl.includes('/chapters/') && !realUrl.includes('blob:')) {
             console.warn('DRM: Unauthorized source detected', 'URL:', realUrl);
           }
         });
@@ -392,7 +464,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       }
     } catch (error) {
       console.error('Error with signed URL seeking:', error);
-      setUsingSignedUrl(false);
       seekToRegular(timeInSeconds);
     }
   }, [fileId, setUsingSignedUrl, setCurrentTime, setIsPlaying, seekToRegular]);
@@ -403,17 +474,56 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       console.log(`DRM: seekTo called with time ${timeInSeconds}`);
       seekToWithSignedUrl(timeInSeconds);
     },
+    playChapter: async (chapter) => {
+      console.log(`🎵 DRMPlayer.playChapter called for: ${chapter.label}`);
+      
+      try {
+        // Generate secure signed URL for chapter streaming
+        const response = await api.post(`/files/${fileId}/chapters/${chapter.id}/stream-url`, {
+          expiresIn: 30 * 60 * 1000 // 30 minutes
+        });
+        
+        const { streamUrl } = response.data.data;
+        
+        if (audioRef.current) {
+          // Stop current playback
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+          
+          // Load chapter stream
+          audioRef.current.src = streamUrl;
+          audioRef.current.crossOrigin = 'use-credentials';
+          audioRef.current.load();
+          
+          // Play the chapter
+          audioRef.current.play().catch(err => {
+            console.error('Chapter play error:', err);
+            if (onError) onError(`Failed to play chapter: ${err.message}`);
+          });
+          
+          console.log(`✅ Started playing chapter: ${chapter.label}`);
+        }
+      } catch (err) {
+        console.error('Chapter streaming error:', err);
+        if (onError) onError(`Failed to stream chapter: ${err.response?.data?.message || err.message}`);
+      }
+    },
     seekToRegular: seekToRegular,
     getCurrentTime: () => currentTime,
     getDuration: () => duration,
     isPlaying: () => isPlaying,
     play: () => audioRef.current?.play(),
     pause: () => audioRef.current?.pause(),
+    stop: () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+    },
     getAudioElement: () => audioRef.current
-  }), [currentTime, duration, isPlaying, seekToRegular, seekToWithSignedUrl]);
+  }), [currentTime, duration, isPlaying, seekToRegular, seekToWithSignedUrl, fileId, onError]);
   
 
-  
   const formatTime = (time) => {
     if (!time || time < 0) return '0:00';
     
@@ -426,8 +536,6 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
     }
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
-  
-
   
   if (isLoading) {
     return (
@@ -498,8 +606,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
         onContextMenu={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}
         onCopy={(e) => e.preventDefault()}
-         onSelectStart={(e) => e.preventDefault()}
-         onDoubleClick={(e) => e.preventDefault()}
+        onDoubleClick={(e) => e.preventDefault()}
          onMouseDown={(e) => {
            // Prevent middle-click and right-click
            if (e.button === 1 || e.button === 2) {

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../api';
+import ChapterManager from '../../components/ChapterManager';
+import DRMPlayer from '../../components/DRMPlayer';
 import {
   Container,
   Typography,
@@ -40,25 +42,21 @@ const FileEdit = () => {
   const [coverImagePreview, setCoverImagePreview] = useState(null);
   const [coverStorageType, setCoverStorageType] = useState('file');
   const [existingCoverType, setExistingCoverType] = useState(null);
-  const [chapters, setChapters] = useState([]);
-  const [newChapter, setNewChapter] = useState({ label: '', startTime: '', endTime: '' });
   const fileInputRef = useRef(null);
   const [originalData, setOriginalData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const drmPlayerRef = useRef(null);
   
   const navigate = useNavigate();
   const { id } = useParams();
 
-  const fetchChapters = async () => {
-    try {
-      const res = await api.get(`/files/${id}/chapters`);
-      setChapters(res.data.data || []);
-    } catch (err) {
-      console.error('Error fetching chapters:', err);
-      // Don't show error for chapters as it's not critical
+  // Handle chapter playback through DRMPlayer
+  const handlePlayChapter = (chapter) => {
+    if (drmPlayerRef.current) {
+      drmPlayerRef.current.playChapter(chapter);
     }
   };
 
@@ -90,8 +88,6 @@ const FileEdit = () => {
           setCoverStorageType(existingType);
         }
         
-        // Fetch chapters
-        await fetchChapters();
       } catch (err) {
         setError('Failed to load file data');
         console.error('Error fetching file:', err);
@@ -130,53 +126,6 @@ const FileEdit = () => {
     setCoverImagePreview(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
-    }
-  };
-
-  // Chapter management functions
-  const handleAddChapter = async () => {
-    if (!newChapter.label || !newChapter.startTime) {
-      setError('Chapter label and start time are required');
-      return;
-    }
-
-    try {
-      const chapterData = {
-        label: newChapter.label,
-        startTime: parseFloat(newChapter.startTime),
-        endTime: newChapter.endTime ? parseFloat(newChapter.endTime) : null
-      };
-
-      const updatedChapters = [...chapters, chapterData];
-      await api.post(`/files/${id}/chapters`, { chapters: updatedChapters });
-      await fetchChapters();
-      setNewChapter({ label: '', startTime: '', endTime: '' });
-      setSuccess('Chapter added successfully!');
-    } catch (err) {
-      setError('Failed to add chapter');
-      console.error('Error adding chapter:', err);
-    }
-  };
-
-  const handleUpdateChapter = async (chapterId, updatedData) => {
-    try {
-      await api.put(`/files/${id}/chapters/${chapterId}`, updatedData);
-      await fetchChapters();
-      setSuccess('Chapter updated successfully!');
-    } catch (err) {
-      setError('Failed to update chapter');
-      console.error('Error updating chapter:', err);
-    }
-  };
-
-  const handleDeleteChapter = async (chapterId) => {
-    try {
-      await api.delete(`/files/${id}/chapters/${chapterId}`);
-      await fetchChapters();
-      setSuccess('Chapter deleted successfully!');
-    } catch (err) {
-      setError('Failed to delete chapter');
-      console.error('Error deleting chapter:', err);
     }
   };
 
@@ -427,10 +376,13 @@ const FileEdit = () => {
                     </Button>
                   </Box>
                   
-                  {/* Storage Type Selection - only show if no existing cover or when uploading new image */}
+                  {/* Cover Image Storage Type Selection - only show if no existing cover or when uploading new image */}
                   {(!existingCoverType || formData.coverImage) && (
                     <FormControl component="fieldset" sx={{ mb: 2 }}>
-                      <FormLabel component="legend">Cover Image Storage</FormLabel>
+                      <FormLabel component="legend">Cover Image Storage Type</FormLabel>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                        Choose how to store the cover image (separate from chapter storage settings below)
+                      </Typography>
                       <RadioGroup
                         value={coverStorageType}
                         onChange={(e) => setCoverStorageType(e.target.value)}
@@ -461,132 +413,27 @@ const FileEdit = () => {
               </FormControl>
             </Grid>
 
-            {/* Chapter Management Section */}
+            {/* Audio Player Section */}
             <Grid item xs={12}>
               <Divider sx={{ my: 3 }} />
               <Typography variant="h6" gutterBottom>
-                Chapter Management
+                Audio Player
               </Typography>
-              
-              {/* Existing Chapters */}
-              {chapters.length > 0 && (
-                <Box sx={{ mb: 3 }}>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Existing Chapters ({chapters.length})
-                  </Typography>
-                  {chapters.map((chapter, index) => (
-                    <Paper key={chapter.id} sx={{ p: 2, mb: 2 }}>
-                      <Grid container spacing={2} alignItems="center">
-                        <Grid item xs={12} sm={4}>
-                          <TextField
-                            fullWidth
-                            label="Chapter Label"
-                            defaultValue={chapter.label}
-                            onBlur={(e) => {
-                              if (e.target.value !== chapter.label) {
-                                handleUpdateChapter(chapter.id, { label: e.target.value });
-                              }
-                            }}
-                            size="small"
-                          />
-                        </Grid>
-                        <Grid item xs={12} sm={3}>
-                          <TextField
-                            fullWidth
-                            label="Start Time (seconds)"
-                            type="number"
-                            defaultValue={chapter.startTime}
-                            onBlur={(e) => {
-                              const newValue = parseFloat(e.target.value);
-                              if (newValue !== chapter.startTime) {
-                                handleUpdateChapter(chapter.id, { startTime: newValue });
-                              }
-                            }}
-                            size="small"
-                          />
-                        </Grid>
-                        <Grid item xs={12} sm={3}>
-                          <TextField
-                            fullWidth
-                            label="End Time (seconds)"
-                            type="number"
-                            defaultValue={chapter.endTime || ''}
-                            onBlur={(e) => {
-                              const newValue = e.target.value ? parseFloat(e.target.value) : null;
-                              if (newValue !== chapter.endTime) {
-                                handleUpdateChapter(chapter.id, { endTime: newValue });
-                              }
-                            }}
-                            size="small"
-                          />
-                        </Grid>
-                        <Grid item xs={12} sm={2}>
-                          <Button
-                            color="error"
-                            onClick={() => handleDeleteChapter(chapter.id)}
-                            size="small"
-                            fullWidth
-                          >
-                            Delete
-                          </Button>
-                        </Grid>
-                      </Grid>
-                    </Paper>
-                  ))}
-                </Box>
-              )}
-              
-              {/* Add New Chapter */}
-              <Paper sx={{ p: 2, backgroundColor: 'grey.50' }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Add New Chapter
-                </Typography>
-                <Grid container spacing={2} alignItems="center">
-                  <Grid item xs={12} sm={4}>
-                    <TextField
-                      fullWidth
-                      label="Chapter Label"
-                      value={newChapter.label}
-                      onChange={(e) => setNewChapter(prev => ({ ...prev, label: e.target.value }))}
-                      size="small"
-                      placeholder="e.g., Introduction"
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      fullWidth
-                      label="Start Time (seconds)"
-                      type="number"
-                      value={newChapter.startTime}
-                      onChange={(e) => setNewChapter(prev => ({ ...prev, startTime: e.target.value }))}
-                      size="small"
-                      placeholder="0"
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      fullWidth
-                      label="End Time (seconds)"
-                      type="number"
-                      value={newChapter.endTime}
-                      onChange={(e) => setNewChapter(prev => ({ ...prev, endTime: e.target.value }))}
-                      size="small"
-                      placeholder="Optional"
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={2}>
-                    <Button
-                      variant="contained"
-                      onClick={handleAddChapter}
-                      size="small"
-                      fullWidth
-                      disabled={!newChapter.label || !newChapter.startTime}
-                    >
-                      Add
-                    </Button>
-                  </Grid>
-                </Grid>
-              </Paper>
+              <DRMPlayer 
+                ref={drmPlayerRef}
+                fileId={id} 
+                onError={(error) => setError(error)}
+              />
+            </Grid>
+
+            {/* Chapter Management Section */}
+            <Grid item xs={12}>
+              <Divider sx={{ my: 3 }} />
+              <ChapterManager 
+                fileId={id} 
+                file={originalData} 
+                onPlayChapter={handlePlayChapter}
+              />
             </Grid>
 
             <Grid item xs={12}>

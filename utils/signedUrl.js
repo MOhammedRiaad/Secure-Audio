@@ -74,10 +74,43 @@ const setRangeHeaders = (res, { status, start, end, fileSize, contentType }) => 
   res.setHeader('Content-Disposition', 'inline; filename="protected-audio"');
 };
 
+// Generate signed URL for chapter streaming with enhanced security
+const generateChapterStreamUrl = (fileId, chapterId, options = {}) => {
+  const {
+    expiresIn = 30 * 60 * 1000, // 30 minutes default
+    ip = '127.0.0.1',
+    token = null,
+    start = '0',
+    end = '-1'
+  } = options;
+  
+  const expires = Date.now() + expiresIn;
+  const chapterRef = `${fileId}:${chapterId}`;
+  
+  const signature = generateSignature({
+    fileRef: chapterRef,
+    start: start.toString(),
+    end: end.toString(),
+    expires,
+    ip
+  });
+  
+  const baseUrl = process.env.API_BASE_URL || 'http://localhost:5000/api/v1';
+  let url = `${baseUrl}/files/${fileId}/chapters/${chapterId}/stream?start=${start}&end=${end}&expires=${expires}&sig=${signature}`;
+  
+  // Add token parameter if provided
+  if (token) {
+    url += `&token=${encodeURIComponent(token)}`;
+  }
+  
+  return url;
+};
+
 module.exports = {
   generateSignature,
   verifySignature,
   generateSignedStreamUrl,
+  generateChapterStreamUrl,
   timeToByteOffset,
   setRangeHeaders
 };

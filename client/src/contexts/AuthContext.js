@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import api from '../api';
+import api, { setGlobalLogoutHandler } from '../api';
 import deviceFingerprint from '../utils/deviceFingerprint';
 
 const AuthContext = createContext();
@@ -34,8 +34,28 @@ export const AuthProvider = ({ children }) => {
     return user && (user.isAdmin || user.role === 'admin');
   };
 
+  // Force logout without API call (for expired tokens or security issues)
+  const forceLogout = (reason = 'Session expired') => {
+    console.log('Force logout triggered:', reason);
+    
+    // Clear local state immediately
+    setAuthToken(null);
+    setCurrentUser(null);
+    setIsAdmin(false);
+    setDeviceSession(null);
+    setDeviceWarnings([]);
+    setPendingLoginData(null);
+    setShowDeviceApproval(false);
+    
+    // Note: Don't make API call since token is likely invalid
+    console.log('User logged out due to:', reason);
+  };
+
   // Load user on mount or when token changes
   useEffect(() => {
+    // Register the force logout handler with the API interceptor
+    setGlobalLogoutHandler(forceLogout);
+    
     const loadUser = async () => {
       if (token) {
         try {
@@ -266,6 +286,7 @@ export const AuthProvider = ({ children }) => {
     pendingLoginData,
     login,
     logout,
+    forceLogout,
     register,
     setCurrentUser,
     clearDeviceWarnings,
