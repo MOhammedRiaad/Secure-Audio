@@ -94,8 +94,6 @@ server {
 
     # Global settings for large files
     client_max_body_size 2G;
-    client_body_timeout 300s;
-    client_header_timeout 300s;
     client_body_buffer_size 128k;
     
     # Serve React build
@@ -118,8 +116,6 @@ server {
     location /api/v1/files {
         # Large file upload settings
         client_max_body_size 2G;
-        client_body_timeout 600s;
-        client_header_timeout 300s;
         client_body_buffer_size 128k;
         
         # Disable proxy buffering for large files
