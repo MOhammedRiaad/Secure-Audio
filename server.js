@@ -34,8 +34,8 @@ const prisma = new PrismaClient({
 // Create Express app
 const app = express();
 
-// Behind Nginx/Proxy: trust X-Forwarded-* headers
-app.set('trust proxy', true);
+// Behind Nginx/Proxy: trust a single proxy hop (safer than 'true')
+app.set('trust proxy', 1);
 
 // Set security HTTP headers
 app.use(helmet());
