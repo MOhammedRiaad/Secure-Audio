@@ -193,9 +193,15 @@ if [ "$DEPLOYMENT_TYPE" = "initial" ]; then
     log "Setting up PM2 startup..."
     pm2 startup | grep "sudo" | bash || true
 else
-    # Restart application
-    log "Restarting application..."
-    pm2 restart secure-audio-api
+    # Check if process exists before restarting
+    if pm2 list | grep -q "secure-audio-api"; then
+        log "Restarting application..."
+        pm2 restart secure-audio-api --update-env
+    else
+        log "Process not found, starting application..."
+        pm2 start ecosystem.config.js --env production
+        pm2 save
+    fi
 fi
 
 # Verify application is running
