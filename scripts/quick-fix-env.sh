@@ -39,9 +39,12 @@ grep "DATABASE_URL" .env
 # Fix the DATABASE_URL
 log "Fixing DATABASE_URL..."
 DB_PASSWORD="SecureAudio2024!@#"
-CORRECT_DB_URL="postgresql://secure_audio_user:$DB_PASSWORD@localhost:5432/secure_audio"
 
-sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"$CORRECT_DB_URL\"|" .env
+# Create backup and fix .env safely
+cp .env .env.backup
+grep -v "^DATABASE_URL=" .env > .env.tmp
+echo "DATABASE_URL=\"postgresql://secure_audio_user:$DB_PASSWORD@localhost:5432/secure_audio\"" >> .env.tmp
+mv .env.tmp .env
 
 log "Updated .env DATABASE_URL:"
 grep "DATABASE_URL" .env

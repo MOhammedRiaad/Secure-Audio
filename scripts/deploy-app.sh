@@ -112,11 +112,15 @@ if [ -f ".env" ]; then
     if [[ "$CURRENT_DB_URL" == *"postgres:"* ]]; then
         warning "Found incorrect postgres credentials in .env file. Fixing..."
         DB_PASSWORD="SecureAudio2024!@#"
-        CORRECT_DB_URL="postgresql://secure_audio_user:$DB_PASSWORD@localhost:5432/secure_audio"
         
-        # Update the DATABASE_URL in .env file
-        sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"$CORRECT_DB_URL\"|" .env
+        # Create a temporary file with the correct DATABASE_URL
+        cp .env .env.backup
+        grep -v "^DATABASE_URL=" .env > .env.tmp
+        echo "DATABASE_URL=\"postgresql://secure_audio_user:$DB_PASSWORD@localhost:5432/secure_audio\"" >> .env.tmp
+        mv .env.tmp .env
+        
         log "Updated DATABASE_URL to use secure_audio_user credentials"
+        log "New DATABASE_URL: $(grep DATABASE_URL .env)"
     fi
 else
     error ".env file not found! Database connection will fail."
