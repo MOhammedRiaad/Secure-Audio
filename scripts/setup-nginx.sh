@@ -89,88 +89,6 @@ server {
         proxy_cache_bypass \$http_upgrade;
     }
 }
-
-server {
-    listen 443 ssl http2;
-    server_name $DOMAIN www.$DOMAIN;
-    
-    # SSL Configuration (will be added by certbot)
-    
-    # Security Headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
-    add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
-    
-    # Gzip Compression
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_proxied expired no-cache no-store private auth;
-    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/javascript;
-    
-    
-    # Serve React Frontend
-    location / {
-        root /var/www/secure-audio/client/build;
-        index index.html index.htm;
-        try_files \$uri \$uri/ /index.html;
-        
-        # Cache static assets
-        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-    }
-    
-    # API Proxy
-    location /api/ {
-        limit_req zone=api burst=20 nodelay;
-        
-        proxy_pass http://localhost:5000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-        
-        # Increase timeouts for file uploads
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        client_max_body_size 100M;
-    }
-    
-    # Special rate limiting for auth endpoints
-    location /api/v1/auth/ {
-        limit_req zone=login burst=5 nodelay;
-        
-        proxy_pass http://localhost:5000;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-    
-    # Serve uploaded files securely
-    location /uploads/ {
-        alias /var/www/secure-audio/uploads/;
-        
-        # Security: prevent execution of uploaded files
-        location ~* \.(php|pl|py|jsp|asp|sh|cgi)$ {
-            deny all;
-        }
-        
-        # Cache uploaded files
-        expires 30d;
-        add_header Cache-Control "public, no-transform";
-    }
-}
 EOF
 
 # Enable the site
@@ -190,17 +108,16 @@ sudo systemctl restart nginx
 
 # Setup SSL with Let's Encrypt
 log "Setting up SSL certificate..."
-sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN || {
-    warning "SSL setup failed. You can run it manually later with:"
-    warning "sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN"
-}
-
-# Update Nginx config to redirect HTTP to HTTPS
-log "Updating Nginx configuration for HTTPS redirect..."
-sudo sed -i 's/# return 301 https/return 301 https/' /etc/nginx/sites-available/secure-audio
-
-# Test and reload Nginx
-sudo nginx -t && sudo systemctl reload nginx
+if sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN; then
+    # Update Nginx config to redirect HTTP to HTTPS (only if certbot succeeded)
+    log "Enabling HTTP->HTTPS redirect..."
+    sudo sed -i 's/# return 301 https/return 301 https/' /etc/nginx/sites-available/secure-audio
+    # Test and reload Nginx
+    sudo nginx -t && sudo systemctl reload nginx
+else
+    warning "SSL setup failed or was skipped. Keeping HTTP only for now."
+    warning "You can run it manually later with: sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN"
+fi
 
 # Setup auto-renewal for SSL
 log "Setting up SSL auto-renewal..."
