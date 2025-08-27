@@ -11,13 +11,15 @@ const authLimiter = rateLimit({
       options.message,
       { 
         retryAfter: Math.ceil(options.windowMs / 1000),
-        ip: req.ip
+        ip: req.headers['x-real-ip'] || req.socket?.remoteAddress || req.ip
       }
     );
     error.send(res);
   },
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  // Use a stable key regardless of X-Forwarded-For quirks
+  keyGenerator: (req, res) => req.headers['x-real-ip'] || req.socket?.remoteAddress || req.ip,
 });
 
 // Rate limiting for API routes
@@ -27,6 +29,8 @@ const apiLimiter = rateLimit({
   message: 'Too many requests from this IP, please try again after 15 minutes',
   standardHeaders: true,
   legacyHeaders: false,
+  // Use a stable key regardless of X-Forwarded-For quirks
+  keyGenerator: (req, res) => req.headers['x-real-ip'] || req.socket?.remoteAddress || req.ip,
 });
 
 // Rate limiting for sensitive operations (e.g., password reset)

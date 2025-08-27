@@ -86,17 +86,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate limiting for all API routes
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 500, // limit each IP to 500 requests per windowMs (increased for device monitoring)
-  message: 'Too many requests from this IP, please try again after 15 minutes',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Apply rate limiting to all API routes
-app.use('/api', limiter);
+// Apply shared API rate limiter
+app.use('/api', apiLimiter);
 
 // Body parser, reading data from body into req.body
 app.use(express.json({ limit: '2gb' }));
