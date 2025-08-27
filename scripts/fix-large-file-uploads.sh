@@ -116,16 +116,19 @@ server {
     location /api/v1/files {
         # Large file upload settings
         client_max_body_size 2G;
+        # Buffer size for reading client request body
+        # Increased from default 8k/16k to handle larger chunks of uploaded data
         client_body_buffer_size 128k;
-        
         # Disable proxy buffering for large files
         proxy_request_buffering off;
         proxy_buffering off;
         
-        # Extended timeouts
-        proxy_connect_timeout 300s;
-        proxy_send_timeout 600s;
-        proxy_read_timeout 600s;
+        # Extended timeouts - 15 minutes for uploads
+        proxy_connect_timeout 900s;
+        proxy_send_timeout 900s;
+        proxy_read_timeout 900s;
+        client_body_timeout 900s;
+        client_header_timeout 900s;
         
         # Proxy settings
         proxy_pass http://localhost:5000;
@@ -140,9 +143,8 @@ server {
         proxy_set_header X-Accel-Buffering no;
     }
 
-    # Regular API endpoints with rate limiting
+    # Regular API endpoints - NO RATE LIMITING FOR UPLOADS
     location /api/ {
-        limit_req zone=api burst=20 nodelay;
         
         # Standard timeouts
         proxy_connect_timeout 60s;
@@ -191,13 +193,13 @@ fi
 
 # Add large file settings to http block if not present
 if ! grep -q "client_max_body_size 2G" "$NGINX_CONF"; then
-    sudo sed -i '/http {/a \    # Large file upload settings' "$NGINX_CONF"
+    sudo sed -i '/http {/a \    # Large file upload settings - 15 minute timeouts' "$NGINX_CONF"
     sudo sed -i '/http {/a \    client_max_body_size 2G;' "$NGINX_CONF"
-    sudo sed -i '/http {/a \    client_body_timeout 300s;' "$NGINX_CONF"
-    sudo sed -i '/http {/a \    client_header_timeout 300s;' "$NGINX_CONF"
-    sudo sed -i '/http {/a \    proxy_read_timeout 600s;' "$NGINX_CONF"
-    sudo sed -i '/http {/a \    proxy_send_timeout 600s;' "$NGINX_CONF"
-    sudo sed -i '/http {/a \    proxy_connect_timeout 300s;' "$NGINX_CONF"
+    sudo sed -i '/http {/a \    client_body_timeout 900s;' "$NGINX_CONF"
+    sudo sed -i '/http {/a \    client_header_timeout 900s;' "$NGINX_CONF"
+    sudo sed -i '/http {/a \    proxy_read_timeout 900s;' "$NGINX_CONF"
+    sudo sed -i '/http {/a \    proxy_send_timeout 900s;' "$NGINX_CONF"
+    sudo sed -i '/http {/a \    proxy_connect_timeout 900s;' "$NGINX_CONF"
 fi
 
 # Test configuration
