@@ -90,10 +90,11 @@ npm install --production
 
 # Install frontend dependencies and build
 log "Building frontend..."
-cd client
-npm install
-npm run build
-cd ..
+# cd client
+# npm install
+# npm run build
+# cd ..
+log "Skipping frontend build on server (using pre-built files from repo)..."
 
 # Create uploads directory
 log "Setting up uploads directory..."
@@ -129,7 +130,7 @@ module.exports = {
     log_file: './logs/combined.log',
     time: true,
     max_memory_restart: '1G',
-    node_args: '--max_old_space_size=1024',
+    node_args: '--max_old_space_size=512',
     watch: false,
     ignore_watch: ['node_modules', 'logs', 'uploads'],
     restart_delay: 4000
