@@ -101,6 +101,25 @@ log "Setting up uploads directory..."
 mkdir -p uploads
 chmod 755 uploads
 
+# Verify database connection first
+log "Verifying database connection..."
+if [ -f ".env" ]; then
+    log "Found .env file, checking DATABASE_URL..."
+    grep "DATABASE_URL" .env || warning "DATABASE_URL not found in .env file"
+else
+    error ".env file not found! Database connection will fail."
+fi
+
+# Test database connection
+log "Testing database connection..."
+DB_PASSWORD="SecureAudio2024!@#"
+PGPASSWORD=$DB_PASSWORD psql -h localhost -U secure_audio_user -d secure_audio -c "SELECT version();" > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    log "Database connection successful"
+else
+    error "Database connection failed. Please run setup-database.sh first or check your database configuration."
+fi
+
 # Run database migrations
 log "Running database migrations..."
 npx prisma migrate deploy
