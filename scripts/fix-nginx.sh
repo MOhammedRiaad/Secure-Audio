@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # Nginx Configuration Fix Script
-# This script fixes the invalid gzip_proxied directive
+# This script fixes two common issues in the Secure-Audio Nginx setup:
+# 1. An invalid 'gzip_proxied' directive value.
+# 2. Misplaced 'limit_req_zone' directives (moves them from server to http context).
 
 set -e
 
@@ -29,27 +31,69 @@ warning() {
     echo -e "${YELLOW}[WARNING] $1${NC}"
 }
 
-log "Fixing Nginx configuration..."
+log "Starting Nginx configuration fix process..."
 
-# Fix the gzip_proxied directive in the existing config
-if [ -f "/etc/nginx/sites-available/secure-audio" ]; then
-    log "Updating existing Nginx configuration..."
-    sudo sed -i 's/gzip_proxied expired no-cache no-store private must-revalidate auth;/gzip_proxied expired no-cache no-store private auth;/' /etc/nginx/sites-available/secure-audio
-    
-    # Test configuration
-    log "Testing Nginx configuration..."
-    sudo nginx -t
-    
-    if [ $? -eq 0 ]; then
-        log "Nginx configuration is valid!"
-        log "Reloading Nginx..."
-        sudo systemctl reload nginx
-        log "Nginx reloaded successfully!"
-    else
-        error "Nginx configuration is still invalid!"
-    fi
-else
-    error "Nginx configuration file not found!"
+# --- Define paths and directives ---
+NGINX_CONF="/etc/nginx/nginx.conf"
+SITE_CONF="/etc/nginx/sites-available/secure-audio"
+LIMIT_REQ_API='limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;'
+LIMIT_REQ_LOGIN='limit_req_zone $binary_remote_addr zone=login:10m rate=1r/s;'
+
+# Check if the site configuration file exists
+if [ ! -f "$SITE_CONF" ]; then
+    error "Nginx site configuration file not found at $SITE_CONF!"
 fi
 
-log "Nginx fix completed!"
+# --- Fix 1: Correct the gzip_proxied directive ---
+log "1. Checking for invalid 'gzip_proxied' directive in $SITE_CONF..."
+if grep -q "gzip_proxied expired no-cache no-store private must-revalidate auth;" "$SITE_CONF"; then
+    info "Invalid 'gzip_proxied' directive found. Fixing it..."
+    sudo sed -i 's/gzip_proxied expired no-cache no-store private must-revalidate auth;/gzip_proxied expired no-cache no-store private auth;/' "$SITE_CONF"
+    log "'gzip_proxied' directive corrected."
+else
+    info "'gzip_proxied' directive is already correct or not found."
+fi
+
+# --- Fix 2: Move limit_req_zone directives ---
+log "2. Checking for misplaced 'limit_req_zone' directives..."
+
+# Remove from site config if they exist there
+if grep -q "limit_req_zone" "$SITE_CONF"; then
+    warning "'limit_req_zone' directives found in $SITE_CONF. Removing them..."
+    sudo sed -i '/limit_req_zone/d' "$SITE_CONF"
+    log "Removed 'limit_req_zone' from site configuration."
+else
+    info "No 'limit_req_zone' directives found in site configuration."
+fi
+
+# Add to nginx.conf if they don't exist there
+log "3. Ensuring 'limit_req_zone' directives are in $NGINX_CONF..."
+if ! grep -q "zone=api:10m" "$NGINX_CONF"; then
+    info "Adding API rate limit to $NGINX_CONF..."
+    sudo sed -i "/http {/a \    $LIMIT_REQ_API" "$NGINX_CONF"
+else
+    info "API rate limit already exists in $NGINX_CONF."
+fi
+
+if ! grep -q "zone=login:10m" "$NGINX_CONF"; then
+    info "Adding Login rate limit to $NGINX_CONF..."
+    sudo sed -i "/http {/a \    $LIMIT_REQ_LOGIN" "$NGINX_CONF"
+else
+    info "Login rate limit already exists in $NGINX_CONF."
+fi
+
+# --- Final Validation and Reload ---
+log "4. Validating final Nginx configuration..."
+
+sudo nginx -t
+
+if [ $? -eq 0 ]; then
+    log "Nginx configuration is valid!"
+    info "Attempting to reload Nginx service..."
+    sudo systemctl reload nginx
+    log "Nginx reloaded successfully!"
+else
+    error "Nginx configuration test failed! Please review the changes made."
+fi
+
+log "Nginx fix script completed successfully!"

@@ -40,8 +40,28 @@ fi
 
 log "Setting up Nginx for domain: $DOMAIN"
 
-# Create Nginx configuration
-log "Creating Nginx configuration..."
+# Add rate limiting zones to the main Nginx config file
+log "Configuring rate limiting in /etc/nginx/nginx.conf..."
+NGINX_CONF="/etc/nginx/nginx.conf"
+LIMIT_REQ_API='limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;'
+LIMIT_REQ_LOGIN='limit_req_zone $binary_remote_addr zone=login:10m rate=1r/s;'
+
+if ! grep -q "zone=api:10m" "$NGINX_CONF"; then
+    info "Adding API rate limit to $NGINX_CONF"
+    sudo sed -i "/http {/a \    $LIMIT_REQ_API" "$NGINX_CONF"
+else
+    info "API rate limit already configured."
+fi
+
+if ! grep -q "zone=login:10m" "$NGINX_CONF"; then
+    info "Adding Login rate limit to $NGINX_CONF"
+    sudo sed -i "/http {/a \    $LIMIT_REQ_LOGIN" "$NGINX_CONF"
+else
+    info "Login rate limit already configured."
+fi
+
+# Create Nginx site configuration
+log "Creating Nginx site configuration for secure-audio..."
 sudo tee /etc/nginx/sites-available/secure-audio > /dev/null << EOF
 # Nginx Configuration for Secure-Audio
 server {
@@ -90,9 +110,6 @@ server {
     gzip_proxied expired no-cache no-store private auth;
     gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/javascript;
     
-    # Rate Limiting
-    limit_req_zone \$binary_remote_addr zone=api:10m rate=10r/s;
-    limit_req_zone \$binary_remote_addr zone=login:10m rate=1r/s;
     
     # Serve React Frontend
     location / {
