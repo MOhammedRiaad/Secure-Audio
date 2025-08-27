@@ -114,7 +114,10 @@ if sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos 
     sudo sed -i 's/# return 301 https/return 301 https/' /etc/nginx/sites-available/secure-audio
 
     # Replace site configuration to serve React on HTTPS and proxy API
-    log "Writing final Nginx site configuration (React at /, API at /api)..."
+    log "Backing up existing site file and writing final Nginx site configuration (React at /, API at /api)..."
+    if [ -f "/etc/nginx/sites-available/secure-audio" ]; then
+        sudo cp /etc/nginx/sites-available/secure-audio /etc/nginx/sites-available/secure-audio.bak.$(date +%Y%m%d%H%M%S)
+    fi
     sudo tee /etc/nginx/sites-available/secure-audio > /dev/null << EOF
 # Secure-Audio Nginx Configuration
 
@@ -210,6 +213,9 @@ server {
     }
 }
 EOF
+
+    # Ensure sites-enabled symlink exists and points to the updated file
+    sudo ln -sf /etc/nginx/sites-available/secure-audio /etc/nginx/sites-enabled/secure-audio
 
     # Test and reload Nginx
     sudo nginx -t && sudo systemctl reload nginx
