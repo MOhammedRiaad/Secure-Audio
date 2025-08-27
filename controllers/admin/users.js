@@ -182,7 +182,7 @@ exports.deleteUser = asyncHandler(async (req, res, next) => {
 
   const user = await prisma.user.findUnique({
     where: {
-      id: req.params.id,
+      id: parseInt(req.params.id),
     },
   });
 
