@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 const ErrorResponse = require('../utils/errorResponse');
 
 // Rate limiting for auth routes
@@ -19,8 +20,11 @@ const authLimiter = rateLimit({
   },
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  // Use a stable key regardless of X-Forwarded-For quirks
-  keyGenerator: (req, res) => req.headers['x-real-ip'] || req.socket?.remoteAddress || req.ip,
+  // Use a stable key regardless of X-Forwarded-For quirks with IPv6 support
+  keyGenerator: (req, res) => {
+    const ip = req.headers['x-real-ip'] || req.socket?.remoteAddress || req.ip;
+    return ipKeyGenerator(ip);
+  },
 });
 
 // Rate limiting for API routes
@@ -31,8 +35,11 @@ const apiLimiter = rateLimit({
   trustProxy: 1,
   standardHeaders: true,
   legacyHeaders: false,
-  // Use a stable key regardless of X-Forwarded-For quirks
-  keyGenerator: (req, res) => req.headers['x-real-ip'] || req.socket?.remoteAddress || req.ip,
+  // Use a stable key regardless of X-Forwarded-For quirks with IPv6 support
+  keyGenerator: (req, res) => {
+    const ip = req.headers['x-real-ip'] || req.socket?.remoteAddress || req.ip;
+    return ipKeyGenerator(ip);
+  },
 });
 
 // Rate limiting for sensitive operations (e.g., password reset)
@@ -40,8 +47,14 @@ const sensitiveOperationLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 5, // limit each IP to 5 requests per hour
   message: 'Too many attempts, please try again later',
+  trustProxy: 1,
   standardHeaders: true,
   legacyHeaders: false,
+  // Use IPv6-safe key generation
+  keyGenerator: (req, res) => {
+    const ip = req.headers['x-real-ip'] || req.socket?.remoteAddress || req.ip;
+    return ipKeyGenerator(ip);
+  },
 });
 
 module.exports = {
