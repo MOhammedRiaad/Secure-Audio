@@ -1,5 +1,4 @@
-const rateLimit = require('express-rate-limit');
-const { ipKeyGenerator } = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const ErrorResponse = require('../utils/errorResponse');
 
 // Rate limiting for auth routes
@@ -57,8 +56,51 @@ const sensitiveOperationLimiter = rateLimit({
   },
 });
 
+// Rate limiting for streaming operations (more permissive for large files)
+const streamingLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 50, // Allow more requests for streaming large files
+  message: 'Too many streaming requests, please try again later',
+  trustProxy: 1,
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Skip rate limiting for authenticated streaming sessions
+  skip: (req, res) => {
+    // Allow unlimited requests for valid streaming sessions
+    const sessionToken = req.params.sessionToken || req.params.token;
+    return sessionToken && sessionToken.length > 20; // Basic session token validation
+  },
+  // Use IPv6-safe key generation
+  keyGenerator: (req, res) => {
+    const ip = req.headers['x-real-ip'] || req.socket?.remoteAddress || req.ip;
+    return ipKeyGenerator(ip);
+  },
+});
+
+// Rate limiting for file uploads (very permissive for large file uploads)
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // Allow 10 uploads per hour per IP
+  message: 'Too many upload attempts, please try again later',
+  trustProxy: 1,
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Skip rate limiting for authenticated admin users
+  skip: (req, res) => {
+    // Allow unlimited uploads for authenticated admin users
+    return req.user && req.user.role === 'admin';
+  },
+  // Use IPv6-safe key generation
+  keyGenerator: (req, res) => {
+    const ip = req.headers['x-real-ip'] || req.socket?.remoteAddress || req.ip;
+    return ipKeyGenerator(ip);
+  },
+});
+
 module.exports = {
   authLimiter,
   apiLimiter,
-  sensitiveOperationLimiter
+  sensitiveOperationLimiter,
+  streamingLimiter,
+  uploadLimiter
 };

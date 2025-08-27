@@ -9,6 +9,7 @@ const {
 } = require('../controllers/drmStream');
 
 const { protect, authorize } = require('../middleware/auth');
+const { streamingLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
@@ -16,10 +17,10 @@ const router = express.Router();
 router.post('/session/:id', protect, generateDRMSession);
 
 // Stream DRM protected audio (no auth middleware - uses session token)
-router.get('/stream/:sessionToken', streamDRMProtectedAudio);
+router.get('/stream/:sessionToken', streamingLimiter, streamDRMProtectedAudio);
 
 // Stream DRM-protected audio in chunks
-router.get('/stream/:sessionToken/chunk/:chunkNumber', streamDRMProtectedAudio);
+router.get('/stream/:sessionToken/chunk/:chunkNumber', streamingLimiter, streamDRMProtectedAudio);
 
 // Encrypt audio file (admin only)
 router.post('/encrypt/:id', protect, authorize('admin'), encryptAudioFile);
@@ -31,6 +32,6 @@ router.get('/status/:id', protect, getDRMStatus);
 router.post('/signed-url/:id', protect, generateSignedStreamUrl);
 
 
-router.get('/audio/:id/stream-signed', streamSignedAudio);
+router.get('/audio/:id/stream-signed', streamingLimiter, streamSignedAudio);
 
 module.exports = router;
