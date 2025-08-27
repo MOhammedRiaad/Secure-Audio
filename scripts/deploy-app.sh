@@ -101,23 +101,35 @@ log "Setting up uploads directory..."
 mkdir -p uploads
 chmod 755 uploads
 
-# Verify database connection first
-log "Verifying database connection..."
+# Verify and fix .env file
+log "Verifying database configuration..."
 if [ -f ".env" ]; then
     log "Found .env file, checking DATABASE_URL..."
-    grep "DATABASE_URL" .env || warning "DATABASE_URL not found in .env file"
+    CURRENT_DB_URL=$(grep "DATABASE_URL" .env | cut -d'=' -f2- | tr -d '"')
+    log "Current DATABASE_URL: $CURRENT_DB_URL"
+    
+    # Check if it's using the wrong credentials
+    if [[ "$CURRENT_DB_URL" == *"postgres:"* ]]; then
+        warning "Found incorrect postgres credentials in .env file. Fixing..."
+        DB_PASSWORD="SecureAudio2024!@#"
+        CORRECT_DB_URL="postgresql://secure_audio_user:$DB_PASSWORD@localhost:5432/secure_audio"
+        
+        # Update the DATABASE_URL in .env file
+        sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"$CORRECT_DB_URL\"|" .env
+        log "Updated DATABASE_URL to use secure_audio_user credentials"
+    fi
 else
     error ".env file not found! Database connection will fail."
 fi
 
-# Test database connection
+# Test database connection with correct credentials
 log "Testing database connection..."
 DB_PASSWORD="SecureAudio2024!@#"
 PGPASSWORD=$DB_PASSWORD psql -h localhost -U secure_audio_user -d secure_audio -c "SELECT version();" > /dev/null 2>&1
 if [ $? -eq 0 ]; then
     log "Database connection successful"
 else
-    error "Database connection failed. Please run setup-database.sh first or check your database configuration."
+    error "Database connection failed. Please run fix-database.sh first."
 fi
 
 # Run database migrations
