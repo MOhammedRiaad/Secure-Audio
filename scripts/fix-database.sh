@@ -32,7 +32,7 @@ warning() {
 # Database configuration
 DB_NAME="secure_audio"
 DB_USER="secure_audio_user"
-DB_PASSWORD="SecureAudio2024!@#"
+DB_PASSWORD="SecureAudio2024"
 
 log "Fixing database connection issues..."
 

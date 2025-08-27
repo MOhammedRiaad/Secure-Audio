@@ -38,7 +38,7 @@ grep "DATABASE_URL" .env
 
 # Fix the DATABASE_URL
 log "Fixing DATABASE_URL..."
-DB_PASSWORD="SecureAudio2024!@#"
+DB_PASSWORD="SecureAudio2024"
 
 # Create backup and fix .env safely
 cp .env .env.backup

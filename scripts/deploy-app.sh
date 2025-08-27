@@ -111,15 +111,16 @@ if [ -f ".env" ]; then
     # Check if it's using the wrong credentials
     if [[ "$CURRENT_DB_URL" == *"postgres:"* ]]; then
         warning "Found incorrect postgres credentials in .env file. Fixing..."
-        DB_PASSWORD="SecureAudio2024!@#"
+        # Use simplified password without special characters
+        DB_PASSWORD_SIMPLE="SecureAudio2024"
         
         # Create a temporary file with the correct DATABASE_URL
         cp .env .env.backup
         grep -v "^DATABASE_URL=" .env > .env.tmp
-        echo "DATABASE_URL=\"postgresql://secure_audio_user:$DB_PASSWORD@localhost:5432/secure_audio\"" >> .env.tmp
+        echo "DATABASE_URL=\"postgresql://secure_audio_user:$DB_PASSWORD_SIMPLE@localhost:5432/secure_audio\"" >> .env.tmp
         mv .env.tmp .env
         
-        log "Updated DATABASE_URL to use secure_audio_user credentials"
+        log "Updated DATABASE_URL to use secure_audio_user credentials with URL encoding"
         log "New DATABASE_URL: $(grep DATABASE_URL .env)"
     fi
 else
@@ -128,7 +129,7 @@ fi
 
 # Test database connection with correct credentials
 log "Testing database connection..."
-DB_PASSWORD="SecureAudio2024!@#"
+DB_PASSWORD="SecureAudio2024"
 PGPASSWORD=$DB_PASSWORD psql -h localhost -U secure_audio_user -d secure_audio -c "SELECT version();" > /dev/null 2>&1
 if [ $? -eq 0 ]; then
     log "Database connection successful"
