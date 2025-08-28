@@ -35,13 +35,18 @@ export default function PlayerScreen() {
   const [drmStatus, setDrmStatus] = useState(null);
   const [loadingChapter, setLoadingChapter] = useState(null);
   const [manualChapterSelection, setManualChapterSelection] = useState(false);
+  const [audioLoaded, setAudioLoaded] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (currentTrack) {
+      setAudioLoaded(false);
       initializeSecurePlayback();
       loadChapters();
       setManualChapterSelection(false); // Reset manual selection for new tracks
+      
+      // Auto-load the full audio file when player screen opens
+      loadFullAudioFile();
     }
   }, [currentTrack]);
 
@@ -88,6 +93,36 @@ export default function PlayerScreen() {
       
       setError(errorMessage);
       Alert.alert('Secure Playback Error', errorMessage);
+    }
+  };
+
+  // Auto-load the full audio file for playback
+  const loadFullAudioFile = async () => {
+    if (!currentTrack || currentTrack.isChapter) return;
+    
+    try {
+      console.log('📼 Auto-loading full audio file:', currentTrack.title);
+      
+      // Load the full audio track through Audio Context
+      await loadSecureTrack(currentTrack, {
+        autoPlay: false, // Don't auto-play, just load
+        onLoadStart: () => {
+          console.log('🔄 Starting to load full audio file');
+        },
+        onLoadComplete: (success) => {
+          if (success) {
+            console.log('✅ Full audio file loaded successfully');
+            setAudioLoaded(true);
+          } else {
+            console.error('❌ Full audio file loading failed');
+            setAudioLoaded(false);
+          }
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error loading full audio file:', error);
+      setAudioLoaded(false);
     }
   };
 
@@ -141,10 +176,12 @@ export default function PlayerScreen() {
         onLoadComplete: (success) => {
           if (success) {
             console.log('✅ Chapter loaded and playing:', chapter.label);
+            setAudioLoaded(true); // Enable controls when chapter loads successfully
           } else {
             console.error('❌ Chapter loading failed:', chapter.label);
             setCurrentChapter(null); // Reset active chapter on error
             setManualChapterSelection(false);
+            setAudioLoaded(false);
           }
         }
       });
@@ -176,11 +213,43 @@ export default function PlayerScreen() {
     }
   };
 
+  // Fix chapter timing display to handle both seconds and milliseconds correctly
   const formatTime = (milliseconds) => {
     const totalSeconds = Math.floor(milliseconds / 1000);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const formatChapterTime = (timeValue, fallbackDuration = 0) => {
+    // Handle chapter times that might be in seconds or milliseconds
+    let timeInMs;
+    if (timeValue > 9999) {
+      // Likely already in milliseconds
+      timeInMs = timeValue;
+    } else {
+      // Likely in seconds, convert to milliseconds
+      timeInMs = timeValue * 1000;
+    }
+    
+    // For end time, use fallback if not provided
+    if (!timeValue && fallbackDuration) {
+      timeInMs = fallbackDuration;
+    }
+    
+    return formatTime(timeInMs);
+  };
+
+  // Helper function to determine if controls should be enabled
+  const areControlsEnabled = () => {
+    // If loading, controls are disabled
+    if (isLoading) return false;
+    
+    // If it's a chapter, controls are enabled once the chapter loads
+    if (currentTrack?.isChapter) return true;
+    
+    // For regular tracks, controls are enabled once audioLoaded is true
+    return audioLoaded;
   };
 
   const handleSeekStart = () => {
@@ -212,6 +281,13 @@ export default function PlayerScreen() {
         console.error('Error saving checkpoint:', error);
       }
     }
+  };
+
+  const handleStop = async () => {
+    await stop();
+    setAudioLoaded(false);
+    setManualChapterSelection(false);
+    setCurrentChapter(null);
   };
 
   const jumpToChapter = async (chapter) => {
@@ -263,7 +339,7 @@ export default function PlayerScreen() {
           !isReady && styles.disabledChapter,
           isLoading && styles.loadingChapter
         ]}
-        onPress={() => isReady && !isLoading ? jumpToChapter(chapter) : null}
+        onPress={() => (isReady && !isLoading) ? jumpToChapter(chapter) : null}
         disabled={!isReady || isLoading}
         activeOpacity={0.7}
       >
@@ -279,7 +355,7 @@ export default function PlayerScreen() {
             )}
           </View>
           <Text style={[styles.chapterTime, (isActive || isCurrentChapterPlaying) && styles.activeChapterText]}>
-            {formatTime(chapter.startTime * 1000)} - {formatTime((chapter.endTime || duration / 1000) * 1000)}
+            {formatChapterTime(chapter.startTime)} - {formatChapterTime(chapter.endTime, duration)}
           </Text>
           <Text style={[styles.chapterStatus, (isActive || isCurrentChapterPlaying) && styles.activeChapterText]}>
             {isReady ? 'Ready' : 'Processing'}
@@ -388,6 +464,22 @@ export default function PlayerScreen() {
             {sessionToken ? 'Secure Session Active' : 'Initializing Security...'}
           </Text>
         </View>
+        
+        {/* Audio Loading Status */}
+        {!audioLoaded && currentTrack && !currentTrack.isChapter && (
+          <View style={styles.loadingStatus}>
+            <ActivityIndicator size="small" color="#007AFF" />
+            <Text style={styles.loadingStatusText}>Loading audio file...</Text>
+          </View>
+        )}
+        
+        {/* Audio Ready Status */}
+        {audioLoaded && !isPlaying && currentTrack && !currentTrack.isChapter && (
+          <View style={styles.readyStatus}>
+            <Ionicons name="checkmark-circle" size={16} color="#28a745" />
+            <Text style={styles.readyStatusText}>Audio ready - Press play to start</Text>
+          </View>
+        )}
       </View>
 
       {/* Progress Bar */}
@@ -406,7 +498,7 @@ export default function PlayerScreen() {
           minimumTrackTintColor="#007AFF"
           maximumTrackTintColor="#ddd"
           thumbStyle={styles.sliderThumb}
-          disabled={isLoading}
+          disabled={!areControlsEnabled()}
         />
         <Text style={styles.timeText}>
           {formatTime(duration)}
@@ -417,16 +509,16 @@ export default function PlayerScreen() {
       <View style={styles.controls}>
         <TouchableOpacity
           style={styles.controlButton}
-          onPress={stop}
-          disabled={isLoading}
+          onPress={handleStop}
+          disabled={!areControlsEnabled()}
         >
-          <Ionicons name="stop" size={32} color={isLoading ? "#ccc" : "#666"} />
+          <Ionicons name="stop" size={32} color={!areControlsEnabled() ? "#ccc" : "#666"} />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.playButton, isLoading && styles.playButtonDisabled]}
+          style={[styles.playButton, !areControlsEnabled() && styles.playButtonDisabled]}
           onPress={playPause}
-          disabled={isLoading}
+          disabled={!areControlsEnabled()}
         >
           {isLoading ? (
             <ActivityIndicator size="large" color="#fff" />
@@ -434,7 +526,7 @@ export default function PlayerScreen() {
             <Ionicons 
               name={isPlaying ? "pause" : "play"} 
               size={48} 
-              color="#fff" 
+              color={!areControlsEnabled() ? "#ccc" : "#fff"} 
             />
           )}
         </TouchableOpacity>
@@ -442,9 +534,9 @@ export default function PlayerScreen() {
         <TouchableOpacity
           style={styles.controlButton}
           onPress={() => {/* Add skip forward functionality */}}
-          disabled={isLoading}
+          disabled={!areControlsEnabled()}
         >
-          <Ionicons name="play-forward" size={32} color={isLoading ? "#ccc" : "#666"} />
+          <Ionicons name="play-forward" size={32} color={!areControlsEnabled() ? "#ccc" : "#666"} />
         </TouchableOpacity>
       </View>
 
@@ -576,6 +668,36 @@ const styles = StyleSheet.create({
   sessionStatusText: {
     fontSize: 12,
     color: '#666',
+  },
+  loadingStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 6,
+  },
+  loadingStatusText: {
+    fontSize: 12,
+    color: '#1976D2',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  readyStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#E8F5E8',
+    borderRadius: 6,
+  },
+  readyStatusText: {
+    fontSize: 12,
+    color: '#155724',
+    marginLeft: 8,
+    fontWeight: '500',
   },
   progressContainer: {
     flexDirection: 'row',
