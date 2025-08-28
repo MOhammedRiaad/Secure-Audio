@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,11 +10,13 @@ import {
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useAudio } from '../contexts/AudioContext';
 import { apiService } from '../services/apiService';
 import { drmService } from '../services/drmService';
 
 export default function PlayerScreen() {
+  const navigation = useNavigation();
   const {
     currentTrack,
     isPlaying,
@@ -290,6 +292,11 @@ export default function PlayerScreen() {
     setCurrentChapter(null);
   };
 
+  const handleBackToDashboard = () => {
+    // Navigate to Dashboard tab
+    navigation.navigate('Dashboard');
+  };
+
   const jumpToChapter = async (chapter) => {
     await playChapter(chapter);
   };
@@ -382,9 +389,23 @@ export default function PlayerScreen() {
   if (!currentTrack) {
     return (
       <View style={styles.emptyContainer}>
-        <Ionicons name="musical-notes-outline" size={64} color="#ccc" />
-        <Text style={styles.emptyText}>No audio selected</Text>
-        <Text style={styles.emptySubtext}>Go to Dashboard to select an audio file</Text>
+        {/* Back Button for Empty State */}
+        <View style={styles.emptyHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={handleBackToDashboard}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="arrow-back" size={24} color="#007AFF" />
+            <Text style={styles.backButtonText}>Dashboard</Text>
+          </TouchableOpacity>
+        </View>
+        
+        <View style={styles.emptyContent}>
+          <Ionicons name="musical-notes-outline" size={64} color="#ccc" />
+          <Text style={styles.emptyText}>No audio selected</Text>
+          <Text style={styles.emptySubtext}>Go to Dashboard to select an audio file</Text>
+        </View>
       </View>
     );
   }
@@ -392,26 +413,52 @@ export default function PlayerScreen() {
   if (error) {
     return (
       <View style={styles.errorContainer}>
-        <Ionicons name="warning-outline" size={64} color="#ff4444" />
-        <Text style={styles.errorText}>Security Error</Text>
-        <Text style={styles.errorSubtext}>{error}</Text>
-        <TouchableOpacity
-          style={styles.retryButton}
-          onPress={() => {
-            setError(null);
-            if (currentTrack) {
-              initializeSecurePlayback();
-            }
-          }}
-        >
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
+        {/* Back Button for Error State */}
+        <View style={styles.errorHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={handleBackToDashboard}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="arrow-back" size={24} color="#007AFF" />
+            <Text style={styles.backButtonText}>Dashboard</Text>
+          </TouchableOpacity>
+        </View>
+        
+        <View style={styles.errorContent}>
+          <Ionicons name="warning-outline" size={64} color="#ff4444" />
+          <Text style={styles.errorText}>Security Error</Text>
+          <Text style={styles.errorSubtext}>{error}</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              setError(null);
+              if (currentTrack) {
+                initializeSecurePlayback();
+              }
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      {/* Back Button Header */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={handleBackToDashboard}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="arrow-back" size={24} color="#007AFF" />
+          <Text style={styles.backButtonText}>Dashboard</Text>
+        </TouchableOpacity>
+      </View>
+      
       {/* Global Loading Overlay for Large Files */}
       {isLoading && (
         <View style={styles.globalLoadingOverlay}>
@@ -570,16 +617,31 @@ const styles = StyleSheet.create({
   },
   emptyContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     backgroundColor: '#f8f9fa',
+    padding: 20,
   },
-  errorContainer: {
+  emptyHeader: {
+    marginBottom: 20,
+    paddingTop: 10,
+  },
+  emptyContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  errorContainer: {
+    flex: 1,
     backgroundColor: '#f8f9fa',
     padding: 20,
+  },
+  errorHeader: {
+    marginBottom: 20,
+    paddingTop: 10,
+  },
+  errorContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   errorText: {
     fontSize: 18,
@@ -898,5 +960,34 @@ const styles = StyleSheet.create({
     marginTop: 12,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  // Back Button Header Styles
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingTop: 10,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });
