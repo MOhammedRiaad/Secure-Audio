@@ -34,12 +34,14 @@ export default function PlayerScreen() {
   const [sessionToken, setSessionToken] = useState(null);
   const [drmStatus, setDrmStatus] = useState(null);
   const [loadingChapter, setLoadingChapter] = useState(null);
+  const [manualChapterSelection, setManualChapterSelection] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (currentTrack) {
       initializeSecurePlayback();
       loadChapters();
+      setManualChapterSelection(false); // Reset manual selection for new tracks
     }
   }, [currentTrack]);
 
@@ -106,6 +108,8 @@ export default function PlayerScreen() {
       if (!currentTrack) return;
       
       setLoadingChapter(chapter.id);
+      setCurrentChapter(chapter); // Set active chapter immediately for UI feedback
+      setManualChapterSelection(true); // Mark as manual selection
       
       // Generate secure signed URL for chapter streaming like web client
       const response = await apiService.generateChapterStreamUrl(currentTrack.id, chapter.id, {
@@ -120,7 +124,7 @@ export default function PlayerScreen() {
         hasStreamUrl: !!streamUrl
       });
       
-      // Load chapter stream through Audio Context
+      // Load chapter stream through Audio Context with auto-play enabled
       await loadSecureTrack({
         ...currentTrack,
         isChapter: true,
@@ -129,24 +133,47 @@ export default function PlayerScreen() {
           label: chapter.label,
           streamUrl
         }
+      }, {
+        autoPlay: true, // Automatically start playing after loading
+        onLoadStart: () => {
+          console.log('🔄 Starting to load chapter:', chapter.label);
+        },
+        onLoadComplete: (success) => {
+          if (success) {
+            console.log('✅ Chapter loaded and playing:', chapter.label);
+          } else {
+            console.error('❌ Chapter loading failed:', chapter.label);
+            setCurrentChapter(null); // Reset active chapter on error
+            setManualChapterSelection(false);
+          }
+        }
       });
       
     } catch (error) {
       console.error('Error playing chapter:', error);
       Alert.alert('Chapter Error', `Failed to play chapter: ${error.response?.data?.message || error.message}`);
+      setCurrentChapter(null); // Reset active chapter on error
+      setManualChapterSelection(false);
     } finally {
       setLoadingChapter(null);
     }
   };
 
   const updateCurrentChapter = () => {
+    // Only update current chapter if not playing a specific chapter AND not manually selected
+    if (currentTrack?.isChapter || manualChapterSelection) return;
+    
     const positionSeconds = position / 1000;
     const chapter = chapters.find((ch, index) => {
       const nextChapter = chapters[index + 1];
       return positionSeconds >= ch.startTime && 
              (!nextChapter || positionSeconds < nextChapter.startTime);
     });
-    setCurrentChapter(chapter);
+    
+    // Only update if chapter actually changed to avoid unnecessary re-renders
+    if (chapter?.id !== currentChapter?.id) {
+      setCurrentChapter(chapter);
+    }
   };
 
   const formatTime = (milliseconds) => {
@@ -225,38 +252,53 @@ export default function PlayerScreen() {
     const isActive = currentChapter?.id === chapter.id;
     const isLoading = loadingChapter === chapter.id;
     const isReady = chapter.status === 'ready';
+    const isCurrentChapterPlaying = currentTrack?.isChapter && currentTrack?.chapterData?.id === chapter.id;
     
     return (
       <TouchableOpacity
         key={chapter.id}
         style={[
           styles.chapterItem, 
-          isActive && styles.activeChapter,
-          !isReady && styles.disabledChapter
+          (isActive || isCurrentChapterPlaying) && styles.activeChapter,
+          !isReady && styles.disabledChapter,
+          isLoading && styles.loadingChapter
         ]}
         onPress={() => isReady && !isLoading ? jumpToChapter(chapter) : null}
         disabled={!isReady || isLoading}
+        activeOpacity={0.7}
       >
         <View style={styles.chapterContent}>
-          <Text style={[styles.chapterTitle, isActive && styles.activeChapterText]}>
-            {chapter.label}
-          </Text>
-          <Text style={[styles.chapterTime, isActive && styles.activeChapterText]}>
+          <View style={styles.chapterHeader}>
+            <Text style={[styles.chapterTitle, (isActive || isCurrentChapterPlaying) && styles.activeChapterText]}>
+              {chapter.label}
+            </Text>
+            {isCurrentChapterPlaying && (
+              <View style={styles.playingIndicator}>
+                <Text style={styles.playingText}>PLAYING</Text>
+              </View>
+            )}
+          </View>
+          <Text style={[styles.chapterTime, (isActive || isCurrentChapterPlaying) && styles.activeChapterText]}>
             {formatTime(chapter.startTime * 1000)} - {formatTime((chapter.endTime || duration / 1000) * 1000)}
           </Text>
-          <Text style={[styles.chapterStatus, isActive && styles.activeChapterText]}>
+          <Text style={[styles.chapterStatus, (isActive || isCurrentChapterPlaying) && styles.activeChapterText]}>
             {isReady ? 'Ready' : 'Processing'}
           </Text>
         </View>
-        {isLoading ? (
-          <ActivityIndicator size="small" color={isActive ? "#fff" : "#007AFF"} />
-        ) : (
-          <Ionicons 
-            name={isReady ? "play" : "time"} 
-            size={20} 
-            color={isActive ? "#fff" : (isReady ? "#007AFF" : "#ccc")} 
-          />
-        )}
+        <View style={styles.chapterAction}>
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={(isActive || isCurrentChapterPlaying) ? "#fff" : "#007AFF"} />
+              <Text style={[styles.loadingText, (isActive || isCurrentChapterPlaying) && styles.activeChapterText]}>Loading...</Text>
+            </View>
+          ) : (
+            <Ionicons 
+              name={isReady ? (isCurrentChapterPlaying ? "pause" : "play") : "time"} 
+              size={20} 
+              color={(isActive || isCurrentChapterPlaying) ? "#fff" : (isReady ? "#007AFF" : "#ccc")} 
+            />
+          )}
+        </View>
       </TouchableOpacity>
     );
   };
@@ -294,6 +336,27 @@ export default function PlayerScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      {/* Global Loading Overlay for Large Files */}
+      {isLoading && (
+        <View style={styles.globalLoadingOverlay}>
+          <View style={styles.loadingCard}>
+            <ActivityIndicator size="large" color="#007AFF" />
+            <Text style={styles.loadingTitle}>
+              {loadingChapter ? 'Loading Chapter...' : 'Loading Audio...'}
+            </Text>
+            <Text style={styles.loadingSubtitle}>
+              {loadingChapter ? 
+                `Preparing ${chapters.find(c => c.id === loadingChapter)?.label || 'chapter'} for playback` :
+                'Setting up secure stream'
+              }
+            </Text>
+            {currentTrack?.isChapter && (
+              <Text style={styles.loadingHint}>Large files may take a moment to load</Text>
+            )}
+          </View>
+        </View>
+      )}
+      
       {/* Track Info */}
       <View style={styles.trackInfo}>
         <Text style={styles.trackTitle} numberOfLines={2}>
@@ -584,9 +647,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
   activeChapter: {
     backgroundColor: '#007AFF',
+    borderColor: '#0051D0',
+    transform: [{ scale: 1.02 }],
+  },
+  loadingChapter: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#90CAF9',
   },
   disabledChapter: {
     backgroundColor: '#f0f0f0',
@@ -595,11 +666,30 @@ const styles = StyleSheet.create({
   chapterContent: {
     flex: 1,
   },
+  chapterHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
   chapterTitle: {
     fontSize: 16,
     color: '#333',
     fontWeight: '500',
-    marginBottom: 4,
+    flex: 1,
+  },
+  playingIndicator: {
+    backgroundColor: '#FF6B6B',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  playingText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+    letterSpacing: 0.5,
   },
   chapterTime: {
     fontSize: 14,
@@ -613,6 +703,20 @@ const styles = StyleSheet.create({
   activeChapterText: {
     color: '#fff',
   },
+  chapterAction: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 50,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 10,
+    color: '#007AFF',
+    marginTop: 4,
+    fontWeight: '500',
+  },
   noChaptersContainer: {
     backgroundColor: '#fff',
     padding: 20,
@@ -624,5 +728,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
+  },
+  // Global Loading Overlay Styles
+  globalLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingCard: {
+    backgroundColor: '#fff',
+    padding: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    minWidth: 250,
+  },
+  loadingTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  loadingSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  loadingHint: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 12,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });

@@ -68,16 +68,20 @@ export const AudioProvider = ({ children }) => {
   };
 
   // New method to load secure tracks with session tokens or signed URLs
-  const loadSecureTrack = async (audioData) => {
+  const loadSecureTrack = async (audioData, options = {}) => {
     try {
+      const { autoPlay = false, onLoadStart, onLoadComplete } = options;
+      
       console.log('🔄 Loading secure track:', {
         isChapter: audioData.isChapter,
         hasChapterData: !!audioData.chapterData,
         hasSignedUrl: !!audioData.signedUrl,
-        audioId: audioData.id
+        audioId: audioData.id,
+        autoPlay
       });
       
       setIsLoading(true);
+      onLoadStart?.();
       
       // Unload previous track
       if (soundRef.current) {
@@ -215,12 +219,14 @@ export const AudioProvider = ({ children }) => {
       console.log('🎧 Creating Audio.Sound with secure source:', {
         hasUri: !!secureSource.uri,
         hasHeaders: !!secureSource.headers,
-        uri: secureSource.uri ? secureSource.uri.substring(0, 50) + '...' : 'none'
+        uri: secureSource.uri ? secureSource.uri.substring(0, 50) + '...' : 'none',
+        autoPlay
       });
+      
       const { sound } = await Audio.Sound.createAsync(
         secureSource,
         { 
-          shouldPlay: false,
+          shouldPlay: autoPlay, // Use autoPlay option
           positionMillis: audioData.seekTime ? audioData.seekTime * 1000 : 0
         },
         onPlaybackStatusUpdate
@@ -234,12 +240,15 @@ export const AudioProvider = ({ children }) => {
         setPosition(audioData.seekTime * 1000);
       }
       
-      console.log('✅ Secure track loaded successfully');
+      console.log('✅ Secure track loaded successfully', { autoPlay });
       setIsLoading(false);
+      onLoadComplete?.(true);
+      
     } catch (error) {
       console.error('❌ Error loading secure track:', error);
       Alert.alert('Error', `Failed to load secure audio: ${error.response?.data?.message || error.message}`);
       setIsLoading(false);
+      onLoadComplete?.(false);
     }
   };
 
