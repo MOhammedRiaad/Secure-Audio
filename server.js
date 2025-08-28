@@ -50,6 +50,16 @@ const corsOptions = {
       return callback(null, true);
     }
     
+    // In development, also allow mobile development servers
+    if (process.env.NODE_ENV === 'development' && origin && (
+      origin.includes('localhost') || 
+      origin.includes('127.0.0.1') || 
+      origin.includes('expo.dev') ||
+      origin.includes('exp.host')
+    )) {
+      return callback(null, true);
+    }
+    
     if (allowedOrigins.indexOf(origin) === -1) {
       const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
       console.error('CORS error:', msg, 'Origin:', origin);
@@ -58,9 +68,32 @@ const corsOptions = {
     return callback(null, true);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-ID', 'x-device-id'],
-  exposedHeaders: ['set-cookie'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Device-ID', 
+    'x-device-id', 
+    'X-Device-Fingerprint',
+    'Range',
+    'Accept',
+    'Accept-Encoding',
+    'Cache-Control',
+    'Origin',
+    'Referer',
+    'User-Agent'
+  ],
+  exposedHeaders: [
+    'set-cookie',
+    'Content-Range',
+    'Accept-Ranges', 
+    'X-Chapter-Id',
+    'X-Chapter-Label',
+    'X-Secure-Stream',
+    'X-Token-Validated',
+    'X-Start-Time',
+    'X-Seek-Applied'
+  ],
   optionsSuccessStatus: 200 // Some legacy browsers choke on 204
 };
 

@@ -695,6 +695,14 @@ exports.streamChapter = asyncHandler(async (req, res, next) => {
         
         res.status(200);
         
+        // Set CORS headers for mobile client access (large file streaming)
+        res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization, X-Device-Fingerprint');
+        res.setHeader('Access-Control-Expose-Headers', 'X-Chapter-Id, X-Chapter-Label, X-Secure-Stream, X-Token-Validated, Content-Range, Accept-Ranges');
+        
         // Stream the file through the decipher
         const fileStream = fs.createReadStream(chapterFilePath);
         fileStream.pipe(decipher).pipe(res);
@@ -754,6 +762,14 @@ exports.streamChapter = asyncHandler(async (req, res, next) => {
     // Disable range requests for individual chapters (they're already segmented)
     res.setHeader('Accept-Ranges', 'none');
     res.setHeader('Content-Length', decryptedData.length);
+    
+    // Set CORS headers for mobile client access
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization, X-Device-Fingerprint');
+    res.setHeader('Access-Control-Expose-Headers', 'X-Chapter-Id, X-Chapter-Label, X-Secure-Stream, X-Token-Validated, Content-Range, Accept-Ranges');
     
     // Stream the decrypted chapter data
     res.status(200);
