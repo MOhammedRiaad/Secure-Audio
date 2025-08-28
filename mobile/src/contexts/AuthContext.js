@@ -27,13 +27,32 @@ export const AuthProvider = ({ children }) => {
     try {
       const token = await AsyncStorage.getItem('authToken');
       if (token) {
+        console.log('🔐 Checking auth status with token:', token.substring(0, 20) + '...');
+        
         // Verify token with backend
         const userData = await apiService.verifyToken();
+        console.log('✅ Auth verification successful:', userData);
         setUser(userData.data || userData);
+      } else {
+        console.log('⚠️ No auth token found in storage');
       }
     } catch (error) {
-      console.error('Auth check failed:', error);
-      await AsyncStorage.removeItem('authToken');
+      console.error('❌ Auth check failed:', {
+        message: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        url: error.config?.url,
+        baseURL: error.config?.baseURL,
+        fullURL: `${error.config?.baseURL}${error.config?.url}`
+      });
+      
+      // Only remove token if it's truly invalid (401/403), not for network issues
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        console.log('🗑️ Removing invalid auth token');
+        await AsyncStorage.removeItem('authToken');
+      } else {
+        console.log('🔄 Network error, keeping token for retry');
+      }
     } finally {
       setLoading(false);
     }

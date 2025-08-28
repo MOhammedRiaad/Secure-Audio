@@ -16,13 +16,35 @@ class ApiService {
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+      
+      console.log('📤 API Request:', {
+        method: config.method?.toUpperCase(),
+        url: `${config.baseURL}${config.url}`,
+        hasAuth: !!config.headers.Authorization
+      });
+      
       return config;
     });
 
     // Add response interceptor for error handling
     this.api.interceptors.response.use(
-      (response) => response.data,
+      (response) => {
+        console.log('✅ API Response:', {
+          status: response.status,
+          url: response.config.url,
+          hasData: !!response.data
+        });
+        return response.data;
+      },
       (error) => {
+        console.error('❌ API Error:', {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          url: error.config?.url,
+          baseURL: error.config?.baseURL,
+          message: error.message
+        });
+        
         if (error.response?.status === 401) {
           // Token expired or invalid
           AsyncStorage.removeItem('authToken');
@@ -42,10 +64,8 @@ class ApiService {
     });
   }
 
-  async verifyToken(token) {
-    return await this.api.get('/auth/verify', {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+  async verifyToken() {
+    return await this.api.get('/auth/me');
   }
 
   // Audio file endpoints (backend uses /files not /audio-files)

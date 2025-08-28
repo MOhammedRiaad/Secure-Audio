@@ -4,11 +4,11 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Slider,
   Alert,
   ActivityIndicator,
   ScrollView,
 } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudio } from '../contexts/AudioContext';
 import { apiService } from '../services/apiService';
