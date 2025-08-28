@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,12 @@ import {
   Slider,
   Alert,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudio } from '../contexts/AudioContext';
 import { apiService } from '../services/apiService';
+import { drmService } from '../services/drmService';
 
 export default function PlayerScreen() {
   const {
@@ -21,16 +23,22 @@ export default function PlayerScreen() {
     isLoading,
     playPause,
     seekTo,
-    stop
+    stop,
+    loadSecureTrack
   } = useAudio();
 
   const [chapters, setChapters] = useState([]);
   const [currentChapter, setCurrentChapter] = useState(null);
   const [seeking, setSeeking] = useState(false);
   const [tempPosition, setTempPosition] = useState(0);
+  const [sessionToken, setSessionToken] = useState(null);
+  const [drmStatus, setDrmStatus] = useState(null);
+  const [loadingChapter, setLoadingChapter] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (currentTrack) {
+      initializeSecurePlayback();
       loadChapters();
     }
   }, [currentTrack]);
@@ -40,6 +48,46 @@ export default function PlayerScreen() {
       updateCurrentChapter();
     }
   }, [position, chapters]);
+
+  // Initialize secure DRM session like web client
+  const initializeSecurePlayback = async () => {
+    if (!currentTrack) return;
+    
+    try {
+      setError(null);
+      
+      // Get DRM status
+      const statusResponse = await apiService.getDRMStatus(currentTrack.id);
+      setDrmStatus(statusResponse.data);
+      
+      // Generate secure session like web client
+      const sessionResponse = await apiService.createDRMSession(currentTrack.id);
+      const sessionData = sessionResponse.data || sessionResponse;
+      
+      setSessionToken(sessionData.sessionToken);
+      
+      console.log('🔐 DRM session initialized:', {
+        fileId: currentTrack.id,
+        sessionToken: sessionData.sessionToken.substring(0, 20) + '...',
+        duration: sessionData.duration
+      });
+      
+    } catch (error) {
+      console.error('🚨 DRM initialization failed:', error);
+      let errorMessage = 'Failed to initialize secure playback';
+      
+      if (error.response?.status === 401) {
+        errorMessage = 'Authentication required. Please log in again.';
+      } else if (error.response?.status === 403) {
+        errorMessage = 'Access denied. You do not have permission to access this file.';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Audio file not found.';
+      }
+      
+      setError(errorMessage);
+      Alert.alert('Secure Playback Error', errorMessage);
+    }
+  };
 
   const loadChapters = async () => {
     if (!currentTrack) return;
@@ -55,17 +103,39 @@ export default function PlayerScreen() {
 
   const playChapter = async (chapter) => {
     try {
-      if (currentTrack) {
-        // Use signed URL for chapter seeking with precise timestamp
-        const chapterStartMs = chapter.startTime * 1000;
-        await seekTo(chapterStartMs);
-        if (!isPlaying) {
-          await playPause();
+      if (!currentTrack) return;
+      
+      setLoadingChapter(chapter.id);
+      
+      // Generate secure signed URL for chapter streaming like web client
+      const response = await apiService.generateChapterStreamUrl(currentTrack.id, chapter.id, {
+        expiresIn: 30 * 60 * 1000 // 30 minutes
+      });
+      
+      const { streamUrl } = response.data;
+      
+      console.log('📺 Playing chapter with secure URL:', {
+        chapterId: chapter.id,
+        label: chapter.label,
+        hasStreamUrl: !!streamUrl
+      });
+      
+      // Load chapter stream through Audio Context
+      await loadSecureTrack({
+        ...currentTrack,
+        isChapter: true,
+        chapterData: {
+          id: chapter.id,
+          label: chapter.label,
+          streamUrl
         }
-      }
+      });
+      
     } catch (error) {
       console.error('Error playing chapter:', error);
-      Alert.alert('Error', 'Failed to play chapter');
+      Alert.alert('Chapter Error', `Failed to play chapter: ${error.response?.data?.message || error.message}`);
+    } finally {
+      setLoadingChapter(null);
     }
   };
 
@@ -97,10 +167,18 @@ export default function PlayerScreen() {
 
   const handleSeekComplete = async (value) => {
     setSeeking(false);
-    await seekTo(value);
+    
+    const timeInSeconds = value / 1000;
+    
+    // Use session-based seeking for better security
+    if (sessionToken) {
+      await seekToWithSession(timeInSeconds);
+    } else {
+      await seekTo(value);
+    }
     
     // Save checkpoint
-    if (currentTrack) {
+    if (currentTrack && !currentTrack.isChapter) {
       try {
         await apiService.saveCheckpoint(currentTrack.id, value);
       } catch (error) {
@@ -113,21 +191,72 @@ export default function PlayerScreen() {
     await playChapter(chapter);
   };
 
+  const seekToWithSession = async (timeInSeconds) => {
+    if (!sessionToken || !currentTrack) {
+      console.warn('No session token available for seeking');
+      return;
+    }
+    
+    try {
+      // Use signed URL for precise timestamp-based streaming like web client
+      const response = await apiService.generateSignedUrl(currentTrack.id, {
+        startTime: timeInSeconds,
+        endTime: -1,
+        expiresIn: 30 * 60 * 1000
+      });
+      
+      const { signedUrl } = response.data;
+      
+      // Reload audio with new signed URL
+      await loadSecureTrack({
+        ...currentTrack,
+        signedUrl,
+        seekTime: timeInSeconds
+      });
+      
+    } catch (error) {
+      console.error('Error with signed URL seeking:', error);
+      // Fallback to regular seeking
+      await seekTo(timeInSeconds * 1000);
+    }
+  };
+
   const renderChapter = (chapter, index) => {
     const isActive = currentChapter?.id === chapter.id;
+    const isLoading = loadingChapter === chapter.id;
+    const isReady = chapter.status === 'ready';
     
     return (
       <TouchableOpacity
         key={chapter.id}
-        style={[styles.chapterItem, isActive && styles.activeChapter]}
-        onPress={() => jumpToChapter(chapter)}
+        style={[
+          styles.chapterItem, 
+          isActive && styles.activeChapter,
+          !isReady && styles.disabledChapter
+        ]}
+        onPress={() => isReady && !isLoading ? jumpToChapter(chapter) : null}
+        disabled={!isReady || isLoading}
       >
-        <Text style={[styles.chapterTitle, isActive && styles.activeChapterText]}>
-          {chapter.title}
-        </Text>
-        <Text style={[styles.chapterTime, isActive && styles.activeChapterText]}>
-          {formatTime(chapter.startTime * 1000)}
-        </Text>
+        <View style={styles.chapterContent}>
+          <Text style={[styles.chapterTitle, isActive && styles.activeChapterText]}>
+            {chapter.label}
+          </Text>
+          <Text style={[styles.chapterTime, isActive && styles.activeChapterText]}>
+            {formatTime(chapter.startTime * 1000)} - {formatTime((chapter.endTime || duration / 1000) * 1000)}
+          </Text>
+          <Text style={[styles.chapterStatus, isActive && styles.activeChapterText]}>
+            {isReady ? 'Ready' : 'Processing'}
+          </Text>
+        </View>
+        {isLoading ? (
+          <ActivityIndicator size="small" color={isActive ? "#fff" : "#007AFF"} />
+        ) : (
+          <Ionicons 
+            name={isReady ? "play" : "time"} 
+            size={20} 
+            color={isActive ? "#fff" : (isReady ? "#007AFF" : "#ccc")} 
+          />
+        )}
       </TouchableOpacity>
     );
   };
@@ -142,18 +271,60 @@ export default function PlayerScreen() {
     );
   }
 
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Ionicons name="warning-outline" size={64} color="#ff4444" />
+        <Text style={styles.errorText}>Security Error</Text>
+        <Text style={styles.errorSubtext}>{error}</Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={() => {
+            setError(null);
+            if (currentTrack) {
+              initializeSecurePlayback();
+            }
+          }}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
       {/* Track Info */}
       <View style={styles.trackInfo}>
         <Text style={styles.trackTitle} numberOfLines={2}>
           {currentTrack.title}
         </Text>
-        {currentChapter && (
+        {currentTrack.isChapter && currentTrack.chapterData && (
           <Text style={styles.currentChapter}>
-            Chapter: {currentChapter.title}
+            Chapter: {currentTrack.chapterData.label}
           </Text>
         )}
+        {currentChapter && !currentTrack.isChapter && (
+          <Text style={styles.currentChapter}>
+            Chapter: {currentChapter.label}
+          </Text>
+        )}
+        
+        {/* DRM Status Indicator */}
+        {drmStatus && (
+          <View style={styles.drmStatus}>
+            <Ionicons name="shield-checkmark" size={16} color="#28a745" />
+            <Text style={styles.drmStatusText}>DRM Protected</Text>
+          </View>
+        )}
+        
+        {/* Session Status */}
+        <View style={styles.sessionStatus}>
+          <View style={[styles.statusDot, sessionToken ? styles.statusActive : styles.statusInactive]} />
+          <Text style={styles.sessionStatusText}>
+            {sessionToken ? 'Secure Session Active' : 'Initializing Security...'}
+          </Text>
+        </View>
       </View>
 
       {/* Progress Bar */}
@@ -217,13 +388,19 @@ export default function PlayerScreen() {
       {/* Chapters */}
       {chapters.length > 0 && (
         <View style={styles.chaptersContainer}>
-          <Text style={styles.chaptersTitle}>Chapters</Text>
+          <Text style={styles.chaptersTitle}>Chapters ({chapters.length})</Text>
           <View style={styles.chaptersList}>
             {chapters.map(renderChapter)}
           </View>
         </View>
       )}
-    </View>
+      
+      {chapters.length === 0 && currentTrack && (
+        <View style={styles.noChaptersContainer}>
+          <Text style={styles.noChaptersText}>No chapters available for this audio file.</Text>
+        </View>
+      )}
+    </ScrollView>
   );
 }
 
@@ -231,13 +408,48 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  scrollContent: {
     padding: 20,
+    paddingBottom: 40,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f8f9fa',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#ff4444',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   emptyText: {
     fontSize: 18,
@@ -252,7 +464,7 @@ const styles = StyleSheet.create({
   },
   trackInfo: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 30,
   },
   trackTitle: {
     fontSize: 24,
@@ -265,11 +477,47 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#007AFF',
     fontWeight: '500',
+    marginBottom: 12,
+  },
+  drmStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e8f5e8',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginBottom: 8,
+  },
+  drmStatusText: {
+    fontSize: 12,
+    color: '#155724',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  sessionStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  statusActive: {
+    backgroundColor: '#28a745',
+  },
+  statusInactive: {
+    backgroundColor: '#6c757d',
+  },
+  sessionStatusText: {
+    fontSize: 12,
+    color: '#666',
   },
   progressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 30,
   },
   timeText: {
     fontSize: 14,
@@ -290,7 +538,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 30,
   },
   controlButton: {
     padding: 16,
@@ -328,20 +576,53 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   activeChapter: {
     backgroundColor: '#007AFF',
   },
+  disabledChapter: {
+    backgroundColor: '#f0f0f0',
+    opacity: 0.6,
+  },
+  chapterContent: {
+    flex: 1,
+  },
   chapterTitle: {
     fontSize: 16,
     color: '#333',
-    flex: 1,
+    fontWeight: '500',
+    marginBottom: 4,
   },
   chapterTime: {
     fontSize: 14,
     color: '#666',
+    marginBottom: 2,
+  },
+  chapterStatus: {
+    fontSize: 12,
+    color: '#888',
   },
   activeChapterText: {
     color: '#fff',
+  },
+  noChaptersContainer: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  noChaptersText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
   },
 });

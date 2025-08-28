@@ -64,7 +64,15 @@ class ApiService {
 
   // DRM Stream with session token
   async getDRMStreamUrl(sessionToken) {
-    return `${API_BASE_URL}/drm/stream/${sessionToken}`;
+    if (!sessionToken) {
+      throw new Error('Session token is required for streaming');
+    }
+    const streamUrl = `${API_BASE_URL}/drm/stream/${sessionToken}`;
+    console.log('🔗 Generated DRM stream URL:', {
+      hasToken: !!sessionToken,
+      url: streamUrl
+    });
+    return streamUrl;
   }
 
   // Generate signed URL for timestamp-based streaming
@@ -82,6 +90,11 @@ class ApiService {
     return await this.api.get(`/files/${audioFileId}/chapters`);
   }
 
+  // Generate signed URL for chapter streaming (like web client)
+  async generateChapterStreamUrl(audioFileId, chapterId, options = {}) {
+    return await this.api.post(`/files/${audioFileId}/chapters/${chapterId}/stream-url`, options);
+  }
+
   // Checkpoint endpoints
   async saveCheckpoint(audioFileId, position) {
     return await this.api.post('/checkpoints', {
@@ -92,11 +105,6 @@ class ApiService {
 
   async getCheckpoint(audioFileId) {
     return await this.api.get(`/checkpoints?fileId=${audioFileId}`);
-  }
-
-  // Verify token endpoint
-  async verifyToken() {
-    return await this.api.get('/auth/me');
   }
 }
 

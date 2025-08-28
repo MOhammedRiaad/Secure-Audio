@@ -11,12 +11,30 @@ class DRMService {
 
   async initializeSecurePlayback(audioFileId) {
     try {
+      console.log('🔐 Starting DRM initialization for audioFileId:', audioFileId);
+      
       // Generate device fingerprint
       const fingerprint = await deviceFingerprint.generateFingerprint();
+      console.log('🔍 Device fingerprint generated:', {
+        hasFingerprint: !!fingerprint?.fingerprint,
+        timestamp: fingerprint?.timestamp
+      });
       
       // Create DRM session with backend
+      console.log('📞 Calling backend to create DRM session...');
       const sessionResponse = await apiService.createDRMSession(audioFileId);
       const sessionData = sessionResponse.data || sessionResponse;
+      
+      console.log('🔑 DRM session response received:', {
+        hasSessionToken: !!sessionData?.sessionToken,
+        hasExpiresIn: !!sessionData?.expiresIn,
+        hasDuration: !!sessionData?.duration,
+        sessionTokenLength: sessionData?.sessionToken?.length
+      });
+      
+      if (!sessionData || !sessionData.sessionToken) {
+        throw new Error('Invalid session data received from server');
+      }
       
       // Store stream session
       this.activeStreams.set(audioFileId, {
@@ -25,10 +43,16 @@ class DRMService {
         fingerprint: fingerprint.fingerprint,
         duration: sessionData.duration
       });
+      
+      console.log('✅ DRM session stored successfully for audioFileId:', audioFileId);
 
       return sessionData;
     } catch (error) {
-      console.error('DRM initialization failed:', error);
+      console.error('❌ DRM initialization failed:', {
+        audioFileId,
+        error: error.message,
+        response: error.response?.data
+      });
       throw error;
     }
   }
@@ -50,12 +74,26 @@ class DRMService {
     }
 
     // Create secure streaming URL with session token
-    const secureUrl = apiService.getDRMStreamUrl(streamSession.sessionToken);
+    const secureUrl = await apiService.getDRMStreamUrl(streamSession.sessionToken);
+    
+    if (!secureUrl) {
+      throw new Error('Failed to generate secure streaming URL');
+    }
+    
+    console.log('🔗 Generated secure streaming URL:', {
+      hasUrl: !!secureUrl,
+      sessionToken: streamSession.sessionToken.substring(0, 20) + '...'
+    });
+    
+    const authToken = await AsyncStorage.getItem('authToken');
+    if (!authToken) {
+      throw new Error('No authentication token available');
+    }
     
     return {
       uri: secureUrl,
       headers: {
-        'Authorization': `Bearer ${await AsyncStorage.getItem('authToken')}`,
+        'Authorization': `Bearer ${authToken}`,
         'X-Device-Fingerprint': streamSession.fingerprint
       }
     };
@@ -156,6 +194,11 @@ class DRMService {
       console.error('Failed to create signed audio source:', error);
       throw error;
     }
+  }
+
+  // Store device fingerprint utility reference
+  get deviceFingerprint() {
+    return deviceFingerprint;
   }
 
   setSecurityViolationCallback(callback) {
