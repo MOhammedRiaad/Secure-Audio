@@ -39,6 +39,11 @@
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone for audio playback."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7d9ce63e-a3d0-4c95-98f0-3e56f0ae372d"
+      }
+    }
   }
 }

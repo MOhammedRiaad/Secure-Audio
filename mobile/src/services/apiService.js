@@ -1,10 +1,16 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
-const API_BASE_URL = 'http://localhost:5000/api/v1'; // Update this to your server URL
+// Get API URL from environment variables
+const API_BASE_URL = Constants.expoConfig?.extra?.apiBaseUrl || 
+                     process.env.EXPO_PUBLIC_API_BASE_URL || 
+                     'http://192.168.1.100:5000/api/v1'; // Fallback URL
 
 class ApiService {
   constructor() {
+    console.log('🌐 API Service initialized with URL:', API_BASE_URL);
+    
     this.api = axios.create({
       baseURL: API_BASE_URL,
       timeout: 10000,
