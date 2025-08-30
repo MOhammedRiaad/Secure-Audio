@@ -1,34 +1,37 @@
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const morgan = require('morgan');
-const cookieParser = require('cookie-parser');
-const helmet = require('helmet');
-const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss-clean');
-const hpp = require('hpp');
-const rateLimit = require('express-rate-limit');
-const { PrismaClient } = require('@prisma/client');
-const errorHandler = require('./middleware/error');
-const auth = require('./middleware/auth');
-const { apiLimiter, sensitiveOperationLimiter } = require('./middleware/rateLimiter');
+const express = require("express");
+const cors = require("cors");
+const path = require("path");
+const morgan = require("morgan");
+const cookieParser = require("cookie-parser");
+const helmet = require("helmet");
+const mongoSanitize = require("express-mongo-sanitize");
+const xss = require("xss-clean");
+const hpp = require("hpp");
+const rateLimit = require("express-rate-limit");
+const { PrismaClient } = require("@prisma/client");
+const errorHandler = require("./middleware/error");
+const auth = require("./middleware/auth");
+const {
+  apiLimiter,
+  sensitiveOperationLimiter,
+} = require("./middleware/rateLimiter");
 
 // Load environment variables
-require('dotenv').config();
+require("dotenv").config();
 
 // Route files
-const authRoutes = require('./routes/auth');
-const audioFilesRoutes = require('./routes/audioFiles');
-const checkpointsRoutes = require('./routes/checkpoints');
-const drmStreamRoutes = require('./routes/drmStream');
-const deviceManagementRoutes = require('./routes/deviceManagement');
-const adminUsersRoutes = require('./routes/admin/users');
-const adminFilesRoutes = require('./routes/admin/files');
-const adminFileAccessRoutes = require('./routes/admin/fileAccess');
+const authRoutes = require("./routes/auth");
+const audioFilesRoutes = require("./routes/audioFiles");
+const checkpointsRoutes = require("./routes/checkpoints");
+const drmStreamRoutes = require("./routes/drmStream");
+const deviceManagementRoutes = require("./routes/deviceManagement");
+const adminUsersRoutes = require("./routes/admin/users");
+const adminFilesRoutes = require("./routes/admin/files");
+const adminFileAccessRoutes = require("./routes/admin/fileAccess");
 
 // Initialize Prisma Client
 const prisma = new PrismaClient({
-  log: ['query', 'info', 'warn', 'error']
+  log: ["query", "info", "warn", "error"],
 });
 
 // Create Express app
@@ -38,81 +41,92 @@ const app = express();
 app.use(helmet());
 
 // Enable CORS
-const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:5000').split(',').map(origin => origin.trim());
+const allowedOrigins = (
+  process.env.CORS_ORIGIN || "http://localhost:3000,http://localhost:5000"
+)
+  .split(",")
+  .map((origin) => origin.trim());
 
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
-    
+
     // In development, allow all localhost origins
-    if (process.env.NODE_ENV === 'development' && origin && origin.includes('localhost')) {
+    if (
+      process.env.NODE_ENV === "development" &&
+      origin &&
+      origin.includes("localhost")
+    ) {
       return callback(null, true);
     }
-    
+
     // In development, also allow mobile development servers
-    if (process.env.NODE_ENV === 'development' && origin && (
-      origin.includes('localhost') || 
-      origin.includes('127.0.0.1') || 
-      origin.includes('expo.dev') ||
-      origin.includes('exp.host')
-    )) {
+    if (
+      process.env.NODE_ENV === "development" &&
+      origin &&
+      (origin.includes("localhost") ||
+        origin.includes("127.0.0.1") ||
+        origin.includes("expo.dev") ||
+        origin.includes("exp.host"))
+    ) {
       return callback(null, true);
     }
-    
+
     if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      console.error('CORS error:', msg, 'Origin:', origin);
+      const msg =
+        "The CORS policy for this site does not allow access from the specified Origin.";
+      console.error("CORS error:", msg, "Origin:", origin);
       return callback(new Error(msg), false);
     }
     return callback(null, true);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
   allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
-    'X-Device-ID', 
-    'x-device-id', 
-    'X-Device-Fingerprint',
-    'Range',
-    'Accept',
-    'Accept-Encoding',
-    'Cache-Control',
-    'Origin',
-    'Referer',
-    'User-Agent'
+    "Content-Type",
+    "Authorization",
+    "X-Device-ID",
+    "x-device-id",
+    "X-Device-Fingerprint",
+    "Range",
+    "Accept",
+    "Accept-Encoding",
+    "Cache-Control",
+    "Origin",
+    "Referer",
+    "User-Agent",
   ],
   exposedHeaders: [
-    'set-cookie',
-    'Content-Range',
-    'Accept-Ranges', 
-    'X-Chapter-Id',
-    'X-Chapter-Label',
-    'X-Secure-Stream',
-    'X-Token-Validated',
-    'X-Start-Time',
-    'X-Seek-Applied'
+    "set-cookie",
+    "Content-Range",
+    "Accept-Ranges",
+    "X-Chapter-Id",
+    "X-Chapter-Label",
+    "X-Secure-Stream",
+    "X-Token-Validated",
+    "X-Start-Time",
+    "X-Seek-Applied",
   ],
-  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+  optionsSuccessStatus: 200, // Some legacy browsers choke on 204
 };
 
 // Apply CORS with the specified options
 app.use(cors(corsOptions));
 
 // Handle preflight requests
-app.options('*', cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 // Set security headers for all responses
 app.use((req, res, next) => {
   // Prevent clickjacking
-  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader("X-Frame-Options", "DENY");
   // Enable XSS protection
-  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader("X-XSS-Protection", "1; mode=block");
   // Prevent MIME type sniffing
-  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader("X-Content-Type-Options", "nosniff");
   // Prevent opening page in iframe
-  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
   next();
 });
 
@@ -120,17 +134,17 @@ app.use((req, res, next) => {
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 500, // limit each IP to 500 requests per windowMs (increased for device monitoring)
-  message: 'Too many requests from this IP, please try again after 15 minutes',
+  message: "Too many requests from this IP, please try again after 15 minutes",
   standardHeaders: true,
   legacyHeaders: false,
 });
 
 // Apply rate limiting to all API routes
-app.use('/api', limiter);
+app.use("/api", limiter);
 
 // Body parser, reading data from body into req.body
-app.use(express.json({ limit: '2gb' }));
-app.use(express.urlencoded({ extended: true, limit: '2gb' }));
+app.use(express.json({ limit: "2gb" }));
+app.use(express.urlencoded({ extended: true, limit: "2gb" }));
 app.use(cookieParser());
 
 // Data sanitization against NoSQL query injection
@@ -143,35 +157,47 @@ app.use(xss());
 app.use(
   hpp({
     whitelist: [
-      'duration',
-      'ratingsQuantity',
-      'ratingsAverage',
-      'maxGroupSize',
-      'difficulty',
-      'price'
-    ]
+      "duration",
+      "ratingsQuantity",
+      "ratingsAverage",
+      "maxGroupSize",
+      "difficulty",
+      "price",
+    ],
   })
 );
 
 // Dev logging middleware
-if (process.env.NODE_ENV === 'development') {
-  app.use(morgan('dev'));
+if (process.env.NODE_ENV === "development") {
+  app.use(morgan("dev"));
 }
 
 // Set static folder
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Mount routers
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/files', auth.protect, audioFilesRoutes);
-app.use('/api/v1/checkpoints', checkpointsRoutes);
-app.use('/api/v1/drm', drmStreamRoutes);
-app.use('/api/v1/devices', deviceManagementRoutes);
+app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/files", auth.protect, audioFilesRoutes);
+app.use("/api/v1/checkpoints", checkpointsRoutes);
+app.use("/api/v1/drm", drmStreamRoutes);
+app.use("/api/v1/devices", deviceManagementRoutes);
 
 // Admin routes (protected and admin only)
-app.use('/api/v1/admin/users', [auth.protect, auth.authorize('admin')], adminUsersRoutes);
-app.use('/api/v1/admin/files', [auth.protect, auth.authorize('admin')], adminFilesRoutes);
-app.use('/api/v1/admin/file-access', [auth.protect, auth.authorize('admin')], adminFileAccessRoutes);
+app.use(
+  "/api/v1/admin/users",
+  [auth.protect, auth.authorize("admin")],
+  adminUsersRoutes
+);
+app.use(
+  "/api/v1/admin/files",
+  [auth.protect, auth.authorize("admin")],
+  adminFilesRoutes
+);
+app.use(
+  "/api/v1/admin/file-access",
+  [auth.protect, auth.authorize("admin")],
+  adminFileAccessRoutes
+);
 
 // Error handling middleware
 app.use(errorHandler);
@@ -183,27 +209,30 @@ const startServer = async () => {
   try {
     // Test database connection
     await prisma.$connect();
-    console.log('Database connected successfully');
-    
+    console.log("Database connected successfully");
+
     const server = app.listen(PORT, () => {
-      console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+      console.log(
+        `Server running in ${
+          process.env.NODE_ENV || "development"
+        } mode on port ${PORT}`
+      );
     });
 
     // Handle unhandled promise rejections
-    process.on('unhandledRejection', (err, promise) => {
-      console.error('Unhandled Rejection at:', promise, 'reason:', err);
+    process.on("unhandledRejection", (err, promise) => {
+      console.error("Unhandled Rejection at:", promise, "reason:", err);
       // Close server & exit process
       server.close(() => process.exit(1));
     });
 
     // Handle uncaught exceptions
-    process.on('uncaughtException', (err) => {
-      console.error('Uncaught Exception:', err);
+    process.on("uncaughtException", (err) => {
+      console.error("Uncaught Exception:", err);
       process.exit(1);
     });
-
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error("Failed to start server:", error);
     process.exit(1);
   }
 };

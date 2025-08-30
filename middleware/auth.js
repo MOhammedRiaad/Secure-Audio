@@ -97,8 +97,11 @@ exports.protect = async (req, res, next) => {
       return next(new ErrorResponse('No user found with this ID', 404));
     }
 
-    // Check if account is locked (either by isLocked flag or temporary lockUntil)
-    if (user.isLocked || (user.lockUntil && user.lockUntil > new Date())) {
+    // Check if user is admin (exempt from account locking)
+    const isAdmin = user.isAdmin || user.role === 'admin';
+    
+    // Check if account is locked (either by isLocked flag or temporary lockUntil) - skip for admin users
+    if (!isAdmin && (user.isLocked || (user.lockUntil && user.lockUntil > new Date()))) {
       console.error('Account is locked for user:', user.id);
       
       // If temporary lock has expired, clear it
