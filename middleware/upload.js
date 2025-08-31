@@ -36,6 +36,18 @@ const upload = multer({
   fileFilter: fileFilter,
   limits: {
     fileSize: parseInt(process.env.MAX_FILE_UPLOAD) || 10 * 1024 * 1024, // 10MB default
+    fieldSize: 100 * 1024 * 1024, // 100MB for field data
+    files: 2, // Maximum number of files
+    parts: 8 // Maximum number of parts
+  },
+  // Add timeout handling for large files
+  preservePath: false,
+  // Custom error handling for timeouts
+  onError: (err, next) => {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      err.message = 'File too large. Maximum size is ' + (parseInt(process.env.MAX_FILE_UPLOAD) / (1024 * 1024 * 1024)).toFixed(1) + 'GB';
+    }
+    next(err);
   }
 });
 

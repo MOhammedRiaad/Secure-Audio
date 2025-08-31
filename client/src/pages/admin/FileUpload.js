@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api';
+import ChunkedFileUpload from '../../components/ChunkedFileUpload';
 import {
   Container,
   Typography,
@@ -22,6 +23,7 @@ import {
   Radio,
   Card,
   CardMedia,
+  Switch,
 } from '@mui/material';
 import { CloudUpload as CloudUploadIcon, ArrowBack as ArrowBackIcon, Image as ImageIcon } from '@mui/icons-material';
 
@@ -41,17 +43,20 @@ const FileUpload = () => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState(false);
-  const [metadata, setMetadata] = useState({
-    artist: '',
-    album: '',
-    genre: '',
-    year: '',
-  });
+  // Metadata state removed as artist/album fields are not used in backend
   
   // Cover image fields
   const [coverImage, setCoverImage] = useState(null);
   const [coverPreview, setCoverPreview] = useState(null);
   const [coverStorageType, setCoverStorageType] = useState('file'); // 'file' or 'base64'
+  
+  // Chunked upload fields
+  const [useChunkedUpload, setUseChunkedUpload] = useState(false);
+  const [chunkedUploadComplete, setChunkedUploadComplete] = useState(false);
+  const [chunkedUploadData, setChunkedUploadData] = useState(null);
+  
+  // Large file threshold (100MB)
+  const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 
   // Handle file selection
   const handleFileChange = (e) => {
@@ -75,7 +80,14 @@ const FileUpload = () => {
       setTitle(fileName);
     }
     
-    // Reset errors when a new file is selected
+    // Auto-suggest chunked upload for large files
+    if (selectedFile.size > LARGE_FILE_THRESHOLD) {
+      setUseChunkedUpload(true);
+    }
+    
+    // Reset upload states
+    setChunkedUploadComplete(false);
+    setChunkedUploadData(null);
     setError('');
   };
 
@@ -102,7 +114,14 @@ const FileUpload = () => {
         setTitle(fileName);
       }
       
-      // Reset errors when a new file is selected
+      // Auto-suggest chunked upload for large files
+      if (selectedFile.size > LARGE_FILE_THRESHOLD) {
+        setUseChunkedUpload(true);
+      }
+      
+      // Reset upload states
+      setChunkedUploadComplete(false);
+      setChunkedUploadData(null);
       setError('');
     }
   };
@@ -148,6 +167,28 @@ const FileUpload = () => {
     }
   };
 
+  // Handle chunked upload completion
+  const handleChunkedUploadComplete = (data) => {
+    setChunkedUploadComplete(true);
+    setChunkedUploadData(data);
+    setSuccess('File uploaded successfully using chunked upload!');
+    
+    // Navigate to file management after 2 seconds
+    setTimeout(() => {
+      navigate('/admin/files');
+    }, 2000);
+  };
+
+  // Handle chunked upload error
+  const handleChunkedUploadError = (error) => {
+    setError(error.message || 'Chunked upload failed. Please try again.');
+  };
+
+  // Handle chunked upload progress
+  const handleChunkedUploadProgress = (progressData) => {
+    setUploadProgress(progressData.progress);
+  };
+
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -159,6 +200,21 @@ const FileUpload = () => {
     
     if (!title.trim()) {
       setError('Please enter a title for the audio file');
+      return;
+    }
+    
+    // If using chunked upload, prevent regular form submission
+    if (useChunkedUpload && !chunkedUploadComplete) {
+      setError('Please complete the chunked upload first or disable chunked upload mode.');
+      return;
+    }
+    
+    // If chunked upload is complete, we don't need to upload again
+    if (chunkedUploadComplete && chunkedUploadData) {
+      setSuccess('File already uploaded successfully!');
+      setTimeout(() => {
+        navigate('/admin/files');
+      }, 1000);
       return;
     }
     
@@ -180,11 +236,7 @@ const FileUpload = () => {
         formData.append('coverStorageType', coverStorageType);
       }
       
-      // Add metadata if available
-      if (metadata.artist) formData.append('artist', metadata.artist);
-      if (metadata.album) formData.append('album', metadata.album);
-      if (metadata.genre) formData.append('genre', metadata.genre);
-      if (metadata.year) formData.append('year', metadata.year);
+      // Artist and album metadata removed as not used in backend
       
       // Upload file with progress tracking
       const response = await api.post('/files', formData, {
@@ -216,12 +268,7 @@ const FileUpload = () => {
       setDescription('');
       setIsPublic(false);
       setCoverStorageType('file');
-      setMetadata({
-        artist: '',
-        album: '',
-        genre: '',
-        year: '',
-      });
+      // Metadata reset removed as fields are not used
       
       // Navigate to file management after 2 seconds
       setTimeout(() => {
@@ -347,7 +394,61 @@ const FileUpload = () => {
       </Paper>
       
       {file && (
-        <Paper sx={{ p: 4, mb: 4 }}>
+        <>
+          {/* Chunked Upload Option */}
+          <Paper sx={{ p: 3, mb: 3 }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Box>
+                <Typography variant="h6" gutterBottom>
+                  Upload Method
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {file.size > LARGE_FILE_THRESHOLD 
+                    ? `Large file detected (${formatFileSize(file.size)}). Chunked upload is recommended for better reliability.`
+                    : 'Choose between regular upload or chunked upload for better reliability.'
+                  }
+                </Typography>
+              </Box>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={useChunkedUpload}
+                    onChange={(e) => {
+                      setUseChunkedUpload(e.target.checked);
+                      setChunkedUploadComplete(false);
+                      setChunkedUploadData(null);
+                    }}
+                    disabled={uploading || chunkedUploadComplete}
+                  />
+                }
+                label="Use Chunked Upload"
+              />
+            </Box>
+            
+            {useChunkedUpload && (
+              <ChunkedFileUpload
+                file={file}
+                onUploadComplete={handleChunkedUploadComplete}
+                onUploadError={handleChunkedUploadError}
+                onUploadProgress={handleChunkedUploadProgress}
+                metadata={{
+                  title,
+                  description,
+                  isPublic
+                }}
+                formData={{
+                  title,
+                  description,
+                  isPublic,
+                  coverStorageType,
+                  ...(coverImage && { cover: coverImage })
+                }}
+                disabled={uploading}
+              />
+            )}
+          </Paper>
+          
+          <Paper sx={{ p: 4, mb: 4 }}>
           <Typography variant="h6" gutterBottom>
             File Details
           </Typography>
@@ -470,45 +571,7 @@ const FileUpload = () => {
               </Grid>
               
               <Grid item xs={12} md={6}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Additional Metadata (Optional)
-                </Typography>
-                
-                <TextField
-                  fullWidth
-                  label="Artist"
-                  value={metadata.artist}
-                  onChange={(e) => setMetadata({ ...metadata, artist: e.target.value })}
-                  margin="dense"
-                />
-                
-                <TextField
-                  fullWidth
-                  label="Album"
-                  value={metadata.album}
-                  onChange={(e) => setMetadata({ ...metadata, album: e.target.value })}
-                  margin="dense"
-                />
-                
-                <Box display="flex" gap={2}>
-                  <TextField
-                    fullWidth
-                    label="Genre"
-                    value={metadata.genre}
-                    onChange={(e) => setMetadata({ ...metadata, genre: e.target.value })}
-                    margin="dense"
-                  />
-                  
-                  <TextField
-                    fullWidth
-                    label="Year"
-                    value={metadata.year}
-                    onChange={(e) => setMetadata({ ...metadata, year: e.target.value })}
-                    margin="dense"
-                    type="number"
-                    inputProps={{ min: '1900', max: '2099', step: '1' }}
-                  />
-                </Box>
+                {/* Additional metadata section removed as artist/album fields are not used in backend */}
               </Grid>
             </Grid>
             
@@ -519,10 +582,15 @@ const FileUpload = () => {
                 color="primary"
                 size="large"
                 startIcon={uploading ? <CircularProgress size={24} /> : <CloudUploadIcon />}
-                disabled={uploading}
+                disabled={uploading || (useChunkedUpload && !chunkedUploadComplete)}
                 fullWidth
               >
-                {uploading ? 'Uploading...' : 'Upload File'}
+                {uploading 
+                  ? 'Uploading...' 
+                  : useChunkedUpload 
+                    ? (chunkedUploadComplete ? 'Complete Upload' : 'Complete Chunked Upload First')
+                    : 'Upload File'
+                }
               </Button>
               
               {uploading && uploadProgress > 0 && (
@@ -540,6 +608,7 @@ const FileUpload = () => {
             </Box>
           </form>
         </Paper>
+        </>
       )}
     </Container>
   );

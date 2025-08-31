@@ -161,8 +161,11 @@ exports.login = asyncHandler(async (req, res, next) => {
       return next(ErrorResponse.unauthorized('Invalid email or password'));
     }
 
-    // Check for existing active sessions if user requires device approval
-    if (user.deviceApprovalRequired) {
+    // Check if user is admin (exempt from device restrictions)
+    const isAdmin = user.isAdmin || user.role === 'admin';
+    
+    // Check for existing active sessions if user requires device approval (unless admin)
+    if (!isAdmin && user.deviceApprovalRequired) {
       const activeSessions = await prisma.activeSession.findMany({
         where: {
           userId: user.id,
@@ -272,14 +275,17 @@ async function handleFailedLogin(userId) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { loginAttempts: true }
+      select: { loginAttempts: true, isAdmin: true, role: true }
     });
+    
+    // Check if user is admin (exempt from account locking)
+    const isAdmin = user?.isAdmin || user?.role === 'admin';
     
     const attempts = (user?.loginAttempts || 0) + 1;
     const updates = { loginAttempts: attempts };
     
-    // Lock the account if max attempts reached
-    if (attempts >= MAX_LOGIN_ATTEMPTS) {
+    // Lock the account if max attempts reached (unless admin)
+    if (!isAdmin && attempts >= MAX_LOGIN_ATTEMPTS) {
       updates.lockUntil = new Date(Date.now() + LOCK_TIME);
     }
     

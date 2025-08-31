@@ -17,7 +17,17 @@ const router = express.Router();
 router.post('/session/:id', protect, generateDRMSession);
 
 // Stream DRM protected audio (no auth middleware - uses session token)
-router.get('/stream/:sessionToken', streamingLimiter, streamDRMProtectedAudio);
+router.options('/stream/:sessionToken', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization, X-Device-Fingerprint');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(200).end();
+});
+
+router.get('/stream/:sessionToken', streamDRMProtectedAudio);
+
 
 // Stream DRM-protected audio in chunks
 router.get('/stream/:sessionToken/chunk/:chunkNumber', streamingLimiter, streamDRMProtectedAudio);

@@ -213,6 +213,10 @@ exports.getAudioFile = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/files
 // @access  Private/Admin
 exports.uploadAudioFile = asyncHandler(async (req, res, next) => {
+  // Set headers for large file upload handling
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Keep-Alive', 'timeout=600, max=1000');
+  
   if (!req.files || req.files.length === 0) {
     return next(new ErrorResponse(`Please upload an audio file`, 400));
   }

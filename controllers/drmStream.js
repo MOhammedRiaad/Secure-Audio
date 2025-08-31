@@ -89,9 +89,13 @@ exports.streamDRMProtectedAudio = asyncHandler(async (req, res, next) => {
       console.error('❌ File not found for DRM session:', session.fileId);
       return next(new ErrorResponse('File not found', 404));
     }
-    
-    const filePath = path.join(process.env.FILE_UPLOAD_PATH, file.path);
-    
+    let filePath;
+    if (file.path.includes('uploads')) {
+      filePath = path.join(file.path);
+    }else{
+      filePath = path.join(process.env.FILE_UPLOAD_PATH, file.path);
+    }
+    console.log('📁 File path:', filePath);
     // Check if file exists
     if (!fs.existsSync(filePath)) {
       console.error('❌ File not found on disk:', filePath);
@@ -114,6 +118,14 @@ exports.streamDRMProtectedAudio = asyncHandler(async (req, res, next) => {
     res.setHeader('Content-Security-Policy', "default-src 'none'");
     res.setHeader('X-Download-Options', 'noopen');
     res.setHeader('Content-Disposition', 'inline; filename="protected-audio"');
+    
+    // Add CORS headers for mobile client access
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization, X-Device-Fingerprint');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, X-Secure-Stream');
     
     // Disable right-click and download attempts
     res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');

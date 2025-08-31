@@ -2,6 +2,42 @@
 
 This directory contains automated deployment scripts for the Secure-Audio application on AWS EC2.
 
+## 👤 User Management Scripts
+
+### create-initial-user.js
+Standalone Node.js script to create an initial database user when the normal seeding process fails.
+
+**Usage:**
+```bash
+# Create admin user with default credentials
+node scripts/create-initial-user.js
+
+# Create user with custom credentials
+node scripts/create-initial-user.js --email admin@myapp.com --password mypassword --name "My Admin"
+
+# Create regular user
+node scripts/create-initial-user.js --email user@test.com --password password123 --name "Test User" --role user
+
+# Show help
+node scripts/create-initial-user.js --help
+```
+
+**Default credentials:**
+- Email: admin@example.com
+- Password: admin123
+- Role: admin
+
+### create-initial-user.bat
+Windows batch script that can be double-clicked to create an initial admin user with default credentials.
+
+### create-initial-user.ps1
+PowerShell script for Windows users with interactive prompts and better error handling.
+
+**To run PowerShell script:**
+```powershell
+PowerShell -ExecutionPolicy Bypass -File scripts\create-initial-user.ps1
+```
+
 ## 🚀 Quick Start
 
 For a complete automated deployment, run:
