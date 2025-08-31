@@ -102,7 +102,9 @@ const ChunkedFileUpload = ({
       const formData = new FormData();
       formData.append('chunk', chunk);
       
-      abortControllerRef.current = new AbortController();
+      // Create a new abort controller for this specific chunk
+      const chunkAbortController = new AbortController();
+      abortControllerRef.current = chunkAbortController;
       
       const response = await api.post('/audio/upload/chunk', formData, {
         headers: {
@@ -113,7 +115,7 @@ const ChunkedFileUpload = ({
           'X-File-Name': file.name,
           'X-File-Size': file.size,
         },
-        signal: abortControllerRef.current.signal,
+        signal: chunkAbortController.signal,
         timeout: 60000, // 60 second timeout per chunk
       });
       
@@ -173,6 +175,8 @@ const ChunkedFileUpload = ({
       let currentUploadId = uploadId;
       if (!currentUploadId) {
         currentUploadId = await initializeUpload();
+        // Add a delay to ensure backend has time to save upload session
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
       
       // Validate uploadId before making status request
@@ -217,7 +221,8 @@ const ChunkedFileUpload = ({
       const finalizeResponse = await api.post(`/audio/upload/finalize/${currentUploadId}`, finalizeFormData, {
         headers: {
           'Content-Type': 'multipart/form-data'
-        }
+        },
+        timeout: 300000 // 5 minute timeout for finalization
       });
       
       setUploadState('completed');
