@@ -10,7 +10,9 @@ const {
 } = require('../controllers/audioFiles');
 const upload = require('../middleware/upload');
 const { imageUpload } = require('../middleware/imageUpload');
+
 const largeFileUploadHandler = require('../middleware/largeFileUpload');
+
 const multer = require('multer');
 
 // Import chapter routes
@@ -65,7 +67,9 @@ const uploadFields = multer({
 // Public routes (no auth required for public files)
 router.route('/')
   .get(protect, getAudioFiles)
+
   .post(protect, authorize('admin'), largeFileUploadHandler, uploadFields, uploadAudioFile);
+
 
 router.route('/:id')
   .get(protect, getAudioFile)
@@ -73,7 +77,7 @@ router.route('/:id')
 
 // Stream token and streaming routes
 router.get('/stream-token/:id', protect, generateStreamToken);
-router.get('/stream/:token', streamAudioFile);
+router.get('/stream/:token', streamingLimiter, streamAudioFile);
 
 // Mount chapter routes
 router.use('/:fileId/chapters', audioChapterRoutes);

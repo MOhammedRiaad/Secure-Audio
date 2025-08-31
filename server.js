@@ -40,6 +40,9 @@ const prisma = new PrismaClient({
 // Create Express app
 const app = express();
 
+// Behind Nginx/Proxy: trust a single proxy hop (safer than 'true')
+app.set('trust proxy', 1);
+
 // Set security HTTP headers
 app.use(helmet());
 
@@ -139,6 +142,7 @@ app.use((req, res, next) => {
   next();
 });
 
+
 // Rate limiting for all API routes
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -166,6 +170,7 @@ const chunkUploadLimiter = rateLimit({
 
 // Apply chunked upload rate limiter specifically to upload routes
 app.use("/api/v1/audio/upload", chunkUploadLimiter);
+
 
 // Body parser, reading data from body into req.body
 app.use(express.json({ limit: "2gb" }));
