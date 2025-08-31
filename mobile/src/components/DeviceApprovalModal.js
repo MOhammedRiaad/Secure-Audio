@@ -6,10 +6,29 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+// Conditionally import @expo/vector-icons only for non-web platforms
+let Ionicons;
+if (Platform.OS !== 'web') {
+  Ionicons = require('@expo/vector-icons').Ionicons;
+}
 
 const DeviceApprovalModal = ({ visible, onApprove, onCancel, message }) => {
+  const renderIcon = (iconName, size, color) => {
+    if (Platform.OS === 'web') {
+      const iconMap = {
+        'warning': '⚠️',
+        'lock-closed': '🔒',
+        'checkmark-circle': '✅',
+        'call': '📞'
+      };
+      return <Text style={{ fontSize: size, color }}>{iconMap[iconName] || '•'}</Text>;
+    } else {
+      return <Ionicons name={iconName} size={size} color={color} />;
+    }
+  };
+
   const handleApprove = () => {
     Alert.alert(
       'Confirm Device Approval',
@@ -31,13 +50,13 @@ const DeviceApprovalModal = ({ visible, onApprove, onCancel, message }) => {
       <View style={styles.overlay}>
         <View style={styles.modal}>
           <View style={styles.header}>
-            <Ionicons name="warning" size={32} color="#FF6B35" />
+            {renderIcon("warning", 32, "#FF6B35")}
             <Text style={styles.title}>Device Security Notice</Text>
           </View>
 
           <View style={styles.content}>
             <View style={styles.lockIcon}>
-              <Ionicons name="lock-closed" size={48} color="#007AFF" />
+              {renderIcon("lock-closed", 48, "#007AFF")}
             </View>
 
             <Text style={styles.subtitle}>Single Device Policy</Text>
@@ -56,19 +75,19 @@ const DeviceApprovalModal = ({ visible, onApprove, onCancel, message }) => {
             <View style={styles.policyDetails}>
               <Text style={styles.policyTitle}>Security Policy:</Text>
               <View style={styles.policyItem}>
-                <Ionicons name="checkmark-circle" size={16} color="#28a745" />
+                {renderIcon("checkmark-circle", 16, "#28a745")}
                 <Text style={styles.policyText}>Only one active device session allowed</Text>
               </View>
               <View style={styles.policyItem}>
-                <Ionicons name="checkmark-circle" size={16} color="#28a745" />
+                {renderIcon("checkmark-circle", 16, "#28a745")}
                 <Text style={styles.policyText}>Account protection against unauthorized access</Text>
               </View>
               <View style={styles.policyItem}>
-                <Ionicons name="warning" size={16} color="#FF6B35" />
+                {renderIcon("warning", 16, "#FF6B35")}
                 <Text style={styles.policyText}>Multi-device login attempts result in account lockout</Text>
               </View>
               <View style={styles.policyItem}>
-                <Ionicons name="call" size={16} color="#007AFF" />
+                {renderIcon("call", 16, "#007AFF")}
                 <Text style={styles.policyText}>Contact support to unlock a locked account</Text>
               </View>
             </View>

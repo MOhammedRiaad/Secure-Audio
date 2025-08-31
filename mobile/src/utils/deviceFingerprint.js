@@ -1,24 +1,50 @@
-import * as Device from 'expo-device';
-import * as Application from 'expo-application';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Conditionally import expo modules only for non-web platforms
+let Device = null;
+let Application = null;
+if (Platform.OS !== 'web') {
+  Device = require('expo-device');
+  Application = require('expo-application');
+}
 
 class DeviceFingerprint {
   async generateFingerprint() {
     try {
-      const deviceInfo = {
+      let deviceInfo = {
         platform: Platform.OS,
         version: Platform.Version,
-        deviceName: Device.deviceName,
-        modelName: Device.modelName,
-        brand: Device.brand,
-        manufacturer: Device.manufacturer,
-        osName: Device.osName,
-        osVersion: Device.osVersion,
-        applicationId: Application.applicationId,
-        applicationName: Application.applicationName,
-        nativeApplicationVersion: Application.nativeApplicationVersion,
       };
+
+      // Handle web platform differently
+      if (Platform.OS === 'web') {
+        deviceInfo = {
+          ...deviceInfo,
+          deviceName: 'Web Browser',
+          modelName: 'Browser',
+          brand: 'Web',
+          manufacturer: 'Browser',
+          osName: 'Web',
+          osVersion: navigator.userAgent,
+          applicationId: 'com.secureaudio.web',
+          applicationName: 'SecureAudio Web',
+          nativeApplicationVersion: '1.0.0',
+        };
+      } else {
+        deviceInfo = {
+          ...deviceInfo,
+          deviceName: Device.deviceName,
+          modelName: Device.modelName,
+          brand: Device.brand,
+          manufacturer: Device.manufacturer,
+          osName: Device.osName,
+          osVersion: Device.osVersion,
+          applicationId: Application.applicationId,
+          applicationName: Application.applicationName,
+          nativeApplicationVersion: Application.nativeApplicationVersion,
+        };
+      }
 
       // Get or create a unique device ID
       let deviceId = await AsyncStorage.getItem('deviceId');

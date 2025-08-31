@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import webStorage from '../utils/webStorage';
 import { apiService } from '../services/apiService';
 import { deviceFingerprint } from '../utils/deviceFingerprint';
 
@@ -25,35 +25,28 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuthStatus = async () => {
     try {
-      const token = await AsyncStorage.getItem('authToken');
+      console.log('Checking auth status...');
+      const token = await webStorage.getItem('authToken');
+      console.log('Token found:', !!token);
+      
+      // For now, skip API verification to test the UI
+      // TODO: Re-enable API verification once backend is available
+      /*
       if (token) {
-        console.log('🔐 Checking auth status with token:', token.substring(0, 20) + '...');
-        
         // Verify token with backend
+        console.log('Verifying token with backend...');
         const userData = await apiService.verifyToken();
-        console.log('✅ Auth verification successful:', userData);
+        console.log('Token verification successful:', userData);
         setUser(userData.data || userData);
       } else {
-        console.log('⚠️ No auth token found in storage');
+        console.log('No token found, user not authenticated');
       }
+      */
     } catch (error) {
-      console.error('❌ Auth check failed:', {
-        message: error.message,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        url: error.config?.url,
-        baseURL: error.config?.baseURL,
-        fullURL: `${error.config?.baseURL}${error.config?.url}`
-      });
-      
-      // Only remove token if it's truly invalid (401/403), not for network issues
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        console.log('🗑️ Removing invalid auth token');
-        await AsyncStorage.removeItem('authToken');
-      } else {
-        console.log('🔄 Network error, keeping token for retry');
-      }
+      console.error('Auth check failed:', error);
+      await webStorage.removeItem('authToken');
     } finally {
+      console.log('Auth check completed, setting loading to false');
       setLoading(false);
     }
   };
@@ -78,7 +71,7 @@ export const AuthProvider = ({ children }) => {
       
       const { token, user: userData } = response;
       
-      await AsyncStorage.setItem('authToken', token);
+      await webStorage.setItem('authToken', token);
       setUser(userData);
       
       return { success: true };
@@ -103,7 +96,7 @@ export const AuthProvider = ({ children }) => {
       
       const { token, user: userData } = response;
       
-      await AsyncStorage.setItem('authToken', token);
+      await webStorage.setItem('authToken', token);
       setUser(userData);
       
       setShowDeviceApproval(false);
@@ -127,7 +120,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      await AsyncStorage.removeItem('authToken');
+      await webStorage.removeItem('authToken');
       setUser(null);
       setShowDeviceApproval(false);
       setPendingLoginData(null);

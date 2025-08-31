@@ -1,7 +1,13 @@
-import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { deviceFingerprint } from '../utils/deviceFingerprint';
 import { apiService } from './apiService';
+
+// Conditionally import expo-av only for non-web platforms
+let Audio = null;
+if (Platform.OS !== 'web') {
+  Audio = require('expo-av').Audio;
+}
 
 class DRMService {
   constructor() {
@@ -11,30 +17,12 @@ class DRMService {
 
   async initializeSecurePlayback(audioFileId) {
     try {
-      console.log('🔐 Starting DRM initialization for audioFileId:', audioFileId);
-      
       // Generate device fingerprint
       const fingerprint = await deviceFingerprint.generateFingerprint();
-      console.log('🔍 Device fingerprint generated:', {
-        hasFingerprint: !!fingerprint?.fingerprint,
-        timestamp: fingerprint?.timestamp
-      });
       
       // Create DRM session with backend
-      console.log('📞 Calling backend to create DRM session...');
       const sessionResponse = await apiService.createDRMSession(audioFileId);
       const sessionData = sessionResponse.data || sessionResponse;
-      
-      console.log('🔑 DRM session response received:', {
-        hasSessionToken: !!sessionData?.sessionToken,
-        hasExpiresIn: !!sessionData?.expiresIn,
-        hasDuration: !!sessionData?.duration,
-        sessionTokenLength: sessionData?.sessionToken?.length
-      });
-      
-      if (!sessionData || !sessionData.sessionToken) {
-        throw new Error('Invalid session data received from server');
-      }
       
       // Store stream session
       this.activeStreams.set(audioFileId, {
@@ -43,16 +31,10 @@ class DRMService {
         fingerprint: fingerprint.fingerprint,
         duration: sessionData.duration
       });
-      
-      console.log('✅ DRM session stored successfully for audioFileId:', audioFileId);
 
       return sessionData;
     } catch (error) {
-      console.error('❌ DRM initialization failed:', {
-        audioFileId,
-        error: error.message,
-        response: error.response?.data
-      });
+      console.error('DRM initialization failed:', error);
       throw error;
     }
   }
@@ -74,26 +56,12 @@ class DRMService {
     }
 
     // Create secure streaming URL with session token
-    const secureUrl = await apiService.getDRMStreamUrl(streamSession.sessionToken);
-    
-    if (!secureUrl) {
-      throw new Error('Failed to generate secure streaming URL');
-    }
-    
-    console.log('🔗 Generated secure streaming URL:', {
-      hasUrl: !!secureUrl,
-      sessionToken: streamSession.sessionToken.substring(0, 20) + '...'
-    });
-    
-    const authToken = await AsyncStorage.getItem('authToken');
-    if (!authToken) {
-      throw new Error('No authentication token available');
-    }
+    const secureUrl = apiService.getDRMStreamUrl(streamSession.sessionToken);
     
     return {
       uri: secureUrl,
       headers: {
-        'Authorization': `Bearer ${authToken}`,
+        'Authorization': `Bearer ${await AsyncStorage.getItem('authToken')}`,
         'X-Device-Fingerprint': streamSession.fingerprint
       }
     };
@@ -194,11 +162,6 @@ class DRMService {
       console.error('Failed to create signed audio source:', error);
       throw error;
     }
-  }
-
-  // Store device fingerprint utility reference
-  get deviceFingerprint() {
-    return deviceFingerprint;
   }
 
   setSecurityViolationCallback(callback) {
