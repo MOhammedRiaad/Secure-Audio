@@ -28,6 +28,9 @@ const deviceManagementRoutes = require("./routes/deviceManagement");
 const adminUsersRoutes = require("./routes/admin/users");
 const adminFilesRoutes = require("./routes/admin/files");
 const adminFileAccessRoutes = require("./routes/admin/fileAccess");
+const adminCleanupRoutes = require("./routes/admin/cleanup");
+const chunkedUploadRoutes = require("./routes/chunkedUpload");
+const chunkCleanupService = require("./services/chunkCleanupService");
 
 // Initialize Prisma Client
 const prisma = new PrismaClient({
@@ -96,6 +99,12 @@ const corsOptions = {
     "Origin",
     "Referer",
     "User-Agent",
+    "X-Upload-Id",
+    "X-Chunk-Index",
+    "X-Total-Chunks",
+    "X-File-Name",
+    "X-File-Size",
+    "X-File-Hash",
   ],
   exposedHeaders: [
     "set-cookie",
@@ -178,6 +187,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 // Mount routers
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/files", auth.protect, audioFilesRoutes);
+app.use("/api/v1/audio/upload", chunkedUploadRoutes);
 app.use("/api/v1/checkpoints", checkpointsRoutes);
 app.use("/api/v1/drm", drmStreamRoutes);
 app.use("/api/v1/devices", deviceManagementRoutes);
@@ -198,6 +208,10 @@ app.use(
   [auth.protect, auth.authorize("admin")],
   adminFileAccessRoutes
 );
+app.use(
+  "/api/v1/admin/cleanup",
+  adminCleanupRoutes
+);
 
 // Error handling middleware
 app.use(errorHandler);
@@ -210,6 +224,10 @@ const startServer = async () => {
     // Test database connection
     await prisma.$connect();
     console.log("Database connected successfully");
+    
+    // Start chunk cleanup service
+    chunkCleanupService.start();
+    console.log("Chunk cleanup service started");
 
     const server = app.listen(PORT, () => {
       console.log(
@@ -218,6 +236,14 @@ const startServer = async () => {
         } mode on port ${PORT}`
       );
     });
+
+    // Configure server timeouts for large file uploads
+    server.timeout = 10 * 60 * 1000; // 10 minutes
+    server.keepAliveTimeout = 5 * 60 * 1000; // 5 minutes
+    server.headersTimeout = 6 * 60 * 1000; // 6 minutes (must be greater than keepAliveTimeout)
+    server.requestTimeout = 10 * 60 * 1000; // 10 minutes
+    server.maxHeadersCount = 2000;
+    server.maxRequestsPerSocket = 0; // No limit
 
     // Handle unhandled promise rejections
     process.on("unhandledRejection", (err, promise) => {

@@ -59,8 +59,7 @@ const Dashboard = () => {
   const filteredFiles = audioFiles.filter(
     (file) =>
       file.title.toLowerCase().includes(searchTerm) ||
-      file.description?.toLowerCase().includes(searchTerm) ||
-      file.filename.toLowerCase().includes(searchTerm)
+      file.description?.toLowerCase().includes(searchTerm) 
   );
 
 

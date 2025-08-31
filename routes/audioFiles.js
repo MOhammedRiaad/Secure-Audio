@@ -10,6 +10,7 @@ const {
 } = require('../controllers/audioFiles');
 const upload = require('../middleware/upload');
 const { imageUpload } = require('../middleware/imageUpload');
+const largeFileUploadHandler = require('../middleware/largeFileUpload');
 const multer = require('multer');
 
 // Import chapter routes
@@ -64,7 +65,7 @@ const uploadFields = multer({
 // Public routes (no auth required for public files)
 router.route('/')
   .get(protect, getAudioFiles)
-  .post(protect, authorize('admin'), uploadFields, uploadAudioFile);
+  .post(protect, authorize('admin'), largeFileUploadHandler, uploadFields, uploadAudioFile);
 
 router.route('/:id')
   .get(protect, getAudioFile)

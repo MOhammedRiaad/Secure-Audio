@@ -145,8 +145,33 @@ enum Role {
   admin
 }
 
+model ChunkUploadSession {
+  id          String   @id @default(cuid())
+  uploadId    String   @unique @map("upload_id")
+  fileName    String   @map("file_name")
+  fileSize    Int      @map("file_size")
+  fileHash    String   @map("file_hash")
+  totalChunks Int      @map("total_chunks")
+  uploadedChunks Int   @default(0) @map("uploaded_chunks")
+  status      ChunkUploadStatus @default(pending)
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  expiresAt   DateTime @map("expires_at")
+
+  @@map("chunk_upload_sessions")
+}
+
 enum ChapterStatus {
   pending
   ready
   failed
+}
+
+enum ChunkUploadStatus {
+  pending
+  uploading
+  completed
+  failed
+  cancelled
 }
