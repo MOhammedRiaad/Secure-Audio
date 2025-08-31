@@ -208,13 +208,22 @@ const ChunkedFileUpload = ({
         updateProgress(i, chunk.size);
       }
       
+      // Add delay before finalization to ensure all chunks are written to disk
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
       // Finalize upload with form data
       const finalizeFormData = new FormData();
       
       // Add form fields
       Object.keys(formData).forEach(key => {
         if (formData[key] !== null && formData[key] !== undefined) {
-          finalizeFormData.append(key, formData[key]);
+          // Handle File objects (like cover images) properly
+          if (formData[key] instanceof File) {
+            finalizeFormData.append(key, formData[key]);
+          } else {
+            // Handle regular form data
+            finalizeFormData.append(key, formData[key]);
+          }
         }
       });
       

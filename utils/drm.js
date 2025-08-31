@@ -329,44 +329,73 @@ class AudioDRM {
 
   // Encrypt audio file at rest with AES-256-GCM
   async encryptAudioFile(inputPath, outputPath) {
-    try {
-      // Generate unique encryption key and IV for this file
-      const key = crypto.randomBytes(32).toString('hex');
-      const iv = crypto.randomBytes(IV_LENGTH).toString('hex');
-      
-      // Read the input file
-      const inputData = fs.readFileSync(inputPath);
-      
-      // Encrypt the file data using GCM
-      const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(key, 'hex'), Buffer.from(iv, 'hex'));
-      
-      let encrypted = cipher.update(inputData);
-      const finalChunk = cipher.final();
-      const authTag = cipher.getAuthTag();
-      
-      encrypted = Buffer.concat([encrypted, finalChunk]);
-      
-      // Prepend IV and auth tag to encrypted data
-      const result = Buffer.concat([
-        Buffer.from(iv, 'hex'),
-        authTag,
-        encrypted
-      ]);
-      
-      // Write encrypted file
-      fs.writeFileSync(outputPath, result);
-      
-      return {
-        key,
-        iv,
-        authTag: authTag.toString('hex'),
-        encryptedPath: outputPath
-      };
-      
-    } catch (error) {
-      console.error('File encryption error:', error);
-      throw new Error('Failed to encrypt audio file');
-    }
+    return new Promise((resolve, reject) => {
+      try {
+        // Generate unique encryption key and IV for this file
+        const key = crypto.randomBytes(32).toString('hex');
+        const iv = crypto.randomBytes(IV_LENGTH).toString('hex');
+        
+        // Create cipher for streaming encryption
+        const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(key, 'hex'), Buffer.from(iv, 'hex'));
+        
+        // Create read and write streams
+        const readStream = fs.createReadStream(inputPath, { highWaterMark: CHUNK_SIZE });
+        const writeStream = fs.createWriteStream(outputPath);
+        
+        // Write IV first (will be needed for decryption)
+        writeStream.write(Buffer.from(iv, 'hex'));
+        
+        let encryptedChunks = [];
+        
+        // Handle streaming encryption
+        readStream.on('data', (chunk) => {
+          const encryptedChunk = cipher.update(chunk);
+          encryptedChunks.push(encryptedChunk);
+          writeStream.write(encryptedChunk);
+        });
+        
+        readStream.on('end', () => {
+          try {
+            // Finalize encryption and get auth tag
+            const finalChunk = cipher.final();
+            const authTag = cipher.getAuthTag();
+            
+            // Write final chunk and auth tag
+            writeStream.write(finalChunk);
+            writeStream.write(authTag);
+            
+            writeStream.end();
+            
+            writeStream.on('finish', () => {
+              resolve({
+                key,
+                iv,
+                authTag: authTag.toString('hex'),
+                encryptedPath: outputPath
+              });
+            });
+            
+          } catch (error) {
+            writeStream.destroy();
+            reject(new Error('Failed to finalize encryption: ' + error.message));
+          }
+        });
+        
+        readStream.on('error', (error) => {
+          writeStream.destroy();
+          reject(new Error('Failed to read input file: ' + error.message));
+        });
+        
+        writeStream.on('error', (error) => {
+          readStream.destroy();
+          reject(new Error('Failed to write encrypted file: ' + error.message));
+        });
+        
+      } catch (error) {
+        console.error('File encryption error:', error);
+        reject(new Error('Failed to encrypt audio file: ' + error.message));
+      }
+    });
   }
 
   // Create decrypted stream for encrypted files (GCM format) - optimized for large files
@@ -383,6 +412,12 @@ class AudioDRM {
       
       console.log(`🔐 Creating decrypted stream for ${isLargeFile ? 'large' : 'normal'} file: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
       
+      // Read auth tag from the end of the file
+      const authTagBuffer = Buffer.alloc(TAG_LENGTH);
+      const fd = fs.openSync(encryptedFilePath, 'r');
+      fs.readSync(fd, authTagBuffer, 0, TAG_LENGTH, fileSize - TAG_LENGTH);
+      fs.closeSync(fd);
+      
       // Create a transform stream for decryption with optimized buffer settings
       const decryptTransform = new Transform({
         // Use smaller high water mark for large files to reduce memory usage
@@ -390,12 +425,12 @@ class AudioDRM {
         
         transform(chunk, encoding, callback) {
           try {
-            // For the first chunk, extract the IV and auth tag
+            // For the first chunk, extract the IV
             if (!this.headerExtracted) {
-              if (chunk.length < IV_LENGTH + TAG_LENGTH) {
+              if (chunk.length < IV_LENGTH) {
                 // Buffer incomplete header
                 this.headerBuffer = this.headerBuffer ? Buffer.concat([this.headerBuffer, chunk]) : chunk;
-                if (this.headerBuffer.length < IV_LENGTH + TAG_LENGTH) {
+                if (this.headerBuffer.length < IV_LENGTH) {
                   return callback(); // Wait for more data
                 }
                 chunk = this.headerBuffer;
@@ -403,15 +438,24 @@ class AudioDRM {
               }
               
               this.fileIV = chunk.slice(0, IV_LENGTH);
-              this.authTag = chunk.slice(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
-              chunk = chunk.slice(IV_LENGTH + TAG_LENGTH);
+              chunk = chunk.slice(IV_LENGTH);
               this.headerExtracted = true;
+              this.totalProcessed = IV_LENGTH;
               
               // Initialize decipher with the IV from the file
               this.decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), this.fileIV);
-              this.decipher.setAuthTag(this.authTag);
+              this.decipher.setAuthTag(authTagBuffer);
               
               console.log(`🔐 Header extracted, remaining chunk size: ${chunk.length} bytes`);
+            }
+            
+            // Track how much we've processed to avoid decrypting the auth tag
+            this.totalProcessed = (this.totalProcessed || 0) + chunk.length;
+            
+            // Don't decrypt the last TAG_LENGTH bytes (auth tag)
+            if (this.totalProcessed > fileSize - TAG_LENGTH) {
+              const overrun = this.totalProcessed - (fileSize - TAG_LENGTH);
+              chunk = chunk.slice(0, chunk.length - overrun);
             }
             
             // Decrypt the chunk
