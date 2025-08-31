@@ -146,10 +146,26 @@ const limiter = rateLimit({
   message: "Too many requests from this IP, please try again after 15 minutes",
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for chunked upload endpoints
+    return req.path.startsWith('/api/v1/audio/upload/');
+  }
 });
 
-// Apply rate limiting to all API routes
+// Apply rate limiting to all API routes except chunked uploads
 app.use("/api", limiter);
+
+// Separate rate limiter for chunked uploads with higher limits
+const chunkUploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 2000, // Allow up to 2000 chunk requests per 15 minutes
+  message: "Too many upload requests from this IP, please try again after 15 minutes",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply chunked upload rate limiter specifically to upload routes
+app.use("/api/v1/audio/upload", chunkUploadLimiter);
 
 // Body parser, reading data from body into req.body
 app.use(express.json({ limit: "2gb" }));

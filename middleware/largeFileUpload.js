@@ -3,8 +3,8 @@ const asyncHandler = require('./async');
 // Middleware to handle large file uploads with proper timeout and connection management
 const largeFileUploadHandler = asyncHandler(async (req, res, next) => {
   // Set extended timeout for large file uploads
-  req.setTimeout(10 * 60 * 1000); // 10 minutes
-  res.setTimeout(10 * 60 * 1000); // 10 minutes
+  req.setTimeout(15 * 60 * 1000); // 15 minutes
+  res.setTimeout(15 * 60 * 1000); // 15 minutes
   
   // Set keep-alive headers
   res.setHeader('Connection', 'keep-alive');
