@@ -522,15 +522,17 @@ const sendTokenResponse = (user, statusCode, res, sessionResult = null) => {
   );
 
   // Cookie options
+  const isProd = process.env.NODE_ENV === 'production';
+  const cookieDomain = process.env.COOKIE_DOMAIN || (isProd ? undefined : 'localhost');
   const cookieOptions = {
     expires: new Date(
       Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000
     ),
     httpOnly: true,
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    sameSite: isProd ? 'lax' : 'lax',
+    secure: isProd, // relies on app.set('trust proxy', true) behind Nginx
     path: '/',
-    domain: process.env.NODE_ENV === 'production' ? '.yourapp.com' : 'localhost'
+    ...(cookieDomain ? { domain: cookieDomain } : {})
   };
 
   // Set cookie

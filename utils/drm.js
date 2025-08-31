@@ -369,18 +369,39 @@ class AudioDRM {
     }
   }
 
-  // Create decrypted stream for encrypted files (GCM format)
+  // Create decrypted stream for encrypted files (GCM format) - optimized for large files
   createDecryptedStream(encryptedFilePath, options) {
     try {
       const { key } = options;
       const { Transform } = require('stream');
+      const performanceConfig = require('../config/performance');
       
-      // Create a transform stream for decryption
+      // Get file size to determine streaming strategy
+      const stats = fs.statSync(encryptedFilePath);
+      const fileSize = stats.size;
+      const isLargeFile = fileSize > performanceConfig.memory.maxBufferSize;
+      
+      console.log(`🔐 Creating decrypted stream for ${isLargeFile ? 'large' : 'normal'} file: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+      
+      // Create a transform stream for decryption with optimized buffer settings
       const decryptTransform = new Transform({
+        // Use smaller high water mark for large files to reduce memory usage
+        highWaterMark: isLargeFile ? 16 * 1024 : 64 * 1024, // 16KB for large files, 64KB for normal
+        
         transform(chunk, encoding, callback) {
           try {
             // For the first chunk, extract the IV and auth tag
             if (!this.headerExtracted) {
+              if (chunk.length < IV_LENGTH + TAG_LENGTH) {
+                // Buffer incomplete header
+                this.headerBuffer = this.headerBuffer ? Buffer.concat([this.headerBuffer, chunk]) : chunk;
+                if (this.headerBuffer.length < IV_LENGTH + TAG_LENGTH) {
+                  return callback(); // Wait for more data
+                }
+                chunk = this.headerBuffer;
+                this.headerBuffer = null;
+              }
+              
               this.fileIV = chunk.slice(0, IV_LENGTH);
               this.authTag = chunk.slice(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
               chunk = chunk.slice(IV_LENGTH + TAG_LENGTH);
@@ -389,6 +410,8 @@ class AudioDRM {
               // Initialize decipher with the IV from the file
               this.decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), this.fileIV);
               this.decipher.setAuthTag(this.authTag);
+              
+              console.log(`🔐 Header extracted, remaining chunk size: ${chunk.length} bytes`);
             }
             
             // Decrypt the chunk
@@ -400,6 +423,7 @@ class AudioDRM {
             }
             
           } catch (error) {
+            console.error('🚨 Decryption transform error:', error);
             callback(error);
           }
         },
@@ -408,22 +432,60 @@ class AudioDRM {
           try {
             if (this.decipher) {
               const final = this.decipher.final();
+              console.log(`🔐 Decryption completed, final chunk size: ${final.length} bytes`);
               callback(null, final);
             } else {
               callback();
             }
           } catch (error) {
+            console.error('🚨 Decryption flush error:', error);
             callback(error);
           }
         }
       });
       
-      // Create file read stream and pipe through decryption
-      const fileStream = fs.createReadStream(encryptedFilePath);
+      // Create file read stream with optimized settings for large files
+      const readStreamOptions = {
+        highWaterMark: isLargeFile ? 32 * 1024 : 64 * 1024, // Smaller chunks for large files
+      };
+      
+      const fileStream = fs.createReadStream(encryptedFilePath, readStreamOptions);
+      
+      // Add error handling and monitoring
+      fileStream.on('error', (error) => {
+        console.error('🚨 File read stream error:', error);
+      });
+      
+      decryptTransform.on('error', (error) => {
+        console.error('🚨 Decrypt transform error:', error);
+      });
+      
+      // Monitor memory usage for large files
+      if (isLargeFile && performanceConfig.monitoring.enablePerformanceMetrics) {
+        const startTime = Date.now();
+        let bytesProcessed = 0;
+        
+        fileStream.on('data', (chunk) => {
+          bytesProcessed += chunk.length;
+        });
+        
+        fileStream.on('end', () => {
+          const duration = Date.now() - startTime;
+          const throughput = (bytesProcessed / 1024 / 1024) / (duration / 1000); // MB/s
+          console.log(`📊 Large file streaming completed: ${(bytesProcessed / 1024 / 1024).toFixed(2)}MB in ${duration}ms (${throughput.toFixed(2)} MB/s)`);
+          
+          // Trigger garbage collection hint for large files
+          if (performanceConfig.memory.enableGcHints && global.gc) {
+            global.gc();
+            console.log('🗑️ Garbage collection triggered after large file processing');
+          }
+        });
+      }
+      
       return fileStream.pipe(decryptTransform);
       
     } catch (error) {
-      console.error('Decrypted stream creation error:', error);
+      console.error('🚨 Decrypted stream creation error:', error);
       throw new Error('Failed to create decrypted stream');
     }
   }

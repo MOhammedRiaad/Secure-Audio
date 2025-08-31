@@ -40,8 +40,28 @@ fi
 
 log "Setting up Nginx for domain: $DOMAIN"
 
-# Create Nginx configuration
-log "Creating Nginx configuration..."
+# Add rate limiting zones to the main Nginx config file
+log "Configuring rate limiting in /etc/nginx/nginx.conf..."
+NGINX_CONF="/etc/nginx/nginx.conf"
+LIMIT_REQ_API='limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;'
+LIMIT_REQ_LOGIN='limit_req_zone $binary_remote_addr zone=login:10m rate=1r/s;'
+
+if ! grep -q "zone=api:10m" "$NGINX_CONF"; then
+    info "Adding API rate limit to $NGINX_CONF"
+    sudo sed -i "/http {/a \    $LIMIT_REQ_API" "$NGINX_CONF"
+else
+    info "API rate limit already configured."
+fi
+
+if ! grep -q "zone=login:10m" "$NGINX_CONF"; then
+    info "Adding Login rate limit to $NGINX_CONF"
+    sudo sed -i "/http {/a \    $LIMIT_REQ_LOGIN" "$NGINX_CONF"
+else
+    info "Login rate limit already configured."
+fi
+
+# Create Nginx site configuration
+log "Creating Nginx site configuration for secure-audio..."
 sudo tee /etc/nginx/sites-available/secure-audio > /dev/null << EOF
 # Nginx Configuration for Secure-Audio
 server {
@@ -69,91 +89,6 @@ server {
         proxy_cache_bypass \$http_upgrade;
     }
 }
-
-server {
-    listen 443 ssl http2;
-    server_name $DOMAIN www.$DOMAIN;
-    
-    # SSL Configuration (will be added by certbot)
-    
-    # Security Headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
-    add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
-    
-    # Gzip Compression
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_proxied expired no-cache no-store private must-revalidate auth;
-    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/javascript;
-    
-    # Rate Limiting
-    limit_req_zone \$binary_remote_addr zone=api:10m rate=10r/s;
-    limit_req_zone \$binary_remote_addr zone=login:10m rate=1r/s;
-    
-    # Serve React Frontend
-    location / {
-        root /var/www/secure-audio/client/build;
-        index index.html index.htm;
-        try_files \$uri \$uri/ /index.html;
-        
-        # Cache static assets
-        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-    }
-    
-    # API Proxy
-    location /api/ {
-        limit_req zone=api burst=20 nodelay;
-        
-        proxy_pass http://localhost:5000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-        
-        # Increase timeouts for file uploads
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        client_max_body_size 100M;
-    }
-    
-    # Special rate limiting for auth endpoints
-    location /api/v1/auth/ {
-        limit_req zone=login burst=5 nodelay;
-        
-        proxy_pass http://localhost:5000;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-    
-    # Serve uploaded files securely
-    location /uploads/ {
-        alias /var/www/secure-audio/uploads/;
-        
-        # Security: prevent execution of uploaded files
-        location ~* \.(php|pl|py|jsp|asp|sh|cgi)$ {
-            deny all;
-        }
-        
-        # Cache uploaded files
-        expires 30d;
-        add_header Cache-Control "public, no-transform";
-    }
-}
 EOF
 
 # Enable the site
@@ -173,17 +108,121 @@ sudo systemctl restart nginx
 
 # Setup SSL with Let's Encrypt
 log "Setting up SSL certificate..."
-sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN || {
-    warning "SSL setup failed. You can run it manually later with:"
-    warning "sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN"
+if sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN; then
+    # Update Nginx config to redirect HTTP to HTTPS (only if certbot succeeded)
+    log "Enabling HTTP->HTTPS redirect..."
+    sudo sed -i 's/# return 301 https/return 301 https/' /etc/nginx/sites-available/secure-audio
+
+    # Replace site configuration to serve React on HTTPS and proxy API
+    log "Backing up existing site file and writing final Nginx site configuration (React at /, API at /api)..."
+    if [ -f "/etc/nginx/sites-available/secure-audio" ]; then
+        sudo cp /etc/nginx/sites-available/secure-audio /etc/nginx/sites-available/secure-audio.bak.$(date +%Y%m%d%H%M%S)
+    fi
+    sudo tee /etc/nginx/sites-available/secure-audio > /dev/null << EOF
+# Secure-Audio Nginx Configuration
+
+server {
+    listen 80;
+    server_name $DOMAIN www.$DOMAIN;
+
+    # Allow ACME challenges
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    # Redirect all HTTP to HTTPS
+    return 301 https://\$server_name\$request_uri;
 }
 
-# Update Nginx config to redirect HTTP to HTTPS
-log "Updating Nginx configuration for HTTPS redirect..."
-sudo sed -i 's/# return 301 https/return 301 https/' /etc/nginx/sites-available/secure-audio
+server {
+    listen 443 ssl http2;
+    server_name $DOMAIN www.$DOMAIN;
 
-# Test and reload Nginx
-sudo nginx -t && sudo systemctl reload nginx
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # Security Headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+    add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
+
+    # Gzip
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_proxied expired no-cache no-store private auth;
+    gzip_types text/plain text/css text/xml text/javascript application/javascript application/json application/xml+rss;
+
+    # Serve React build
+    root /var/www/secure-audio/client/build;
+    index index.html;
+
+    # SPA fallback
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    # Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files \$uri =404;
+    }
+
+    # API proxy
+    location /api/ {
+        limit_req zone=api burst=20 nodelay;
+
+        proxy_pass http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        client_max_body_size 100M;
+    }
+
+    # Stricter rate limit for auth endpoints
+    location /api/v1/auth/ {
+        limit_req zone=login burst=5 nodelay;
+
+        proxy_pass http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Static uploads (optional)
+    location /uploads/ {
+        alias /var/www/secure-audio/uploads/;
+        location ~* \.(php|pl|py|jsp|asp|sh|cgi)$ { deny all; }
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+}
+EOF
+
+    # Ensure sites-enabled symlink exists and points to the updated file
+    sudo ln -sf /etc/nginx/sites-available/secure-audio /etc/nginx/sites-enabled/secure-audio
+
+    # Test and reload Nginx
+    sudo nginx -t && sudo systemctl reload nginx
+else
+    warning "SSL setup failed or was skipped. Keeping HTTP only for now."
+    warning "You can run it manually later with: sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN"
+fi
 
 # Setup auto-renewal for SSL
 log "Setting up SSL auto-renewal..."

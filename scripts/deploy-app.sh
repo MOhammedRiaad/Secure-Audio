@@ -90,15 +90,52 @@ npm install --production
 
 # Install frontend dependencies and build
 log "Building frontend..."
-cd client
-npm install
-npm run build
-cd ..
+# cd client
+# npm install
+# npm run build
+# cd ..
+log "Skipping frontend build on server (using pre-built files from repo)..."
 
 # Create uploads directory
 log "Setting up uploads directory..."
 mkdir -p uploads
 chmod 755 uploads
+
+# Verify and fix .env file
+log "Verifying database configuration..."
+if [ -f ".env" ]; then
+    log "Found .env file, checking DATABASE_URL..."
+    CURRENT_DB_URL=$(grep "DATABASE_URL" .env | cut -d'=' -f2- | tr -d '"')
+    log "Current DATABASE_URL: $CURRENT_DB_URL"
+    
+    # Check if it's using the wrong credentials
+    if [[ "$CURRENT_DB_URL" == *"postgres:"* ]]; then
+        warning "Found incorrect postgres credentials in .env file. Fixing..."
+        # Use simplified password without special characters
+        DB_PASSWORD_SIMPLE="SecureAudio2024"
+        
+        # Create a temporary file with the correct DATABASE_URL
+        cp .env .env.backup
+        grep -v "^DATABASE_URL=" .env > .env.tmp
+        echo "DATABASE_URL=\"postgresql://secure_audio_user:$DB_PASSWORD_SIMPLE@localhost:5432/secure_audio\"" >> .env.tmp
+        mv .env.tmp .env
+        
+        log "Updated DATABASE_URL to use secure_audio_user credentials with URL encoding"
+        log "New DATABASE_URL: $(grep DATABASE_URL .env)"
+    fi
+else
+    error ".env file not found! Database connection will fail."
+fi
+
+# Test database connection with correct credentials
+log "Testing database connection..."
+DB_PASSWORD="SecureAudio2024"
+PGPASSWORD=$DB_PASSWORD psql -h localhost -U secure_audio_user -d secure_audio -c "SELECT version();" > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    log "Database connection successful"
+else
+    error "Database connection failed. Please run fix-database.sh first."
+fi
 
 # Run database migrations
 log "Running database migrations..."
@@ -129,7 +166,7 @@ module.exports = {
     log_file: './logs/combined.log',
     time: true,
     max_memory_restart: '1G',
-    node_args: '--max_old_space_size=1024',
+    node_args: '--max_old_space_size=512',
     watch: false,
     ignore_watch: ['node_modules', 'logs', 'uploads'],
     restart_delay: 4000
@@ -156,9 +193,15 @@ if [ "$DEPLOYMENT_TYPE" = "initial" ]; then
     log "Setting up PM2 startup..."
     pm2 startup | grep "sudo" | bash || true
 else
-    # Restart application
-    log "Restarting application..."
-    pm2 restart secure-audio-api
+    # Check if process exists before restarting
+    if pm2 list | grep -q "secure-audio-api"; then
+        log "Restarting application..."
+        pm2 restart secure-audio-api --update-env
+    else
+        log "Process not found, starting application..."
+        pm2 start ecosystem.config.js --env production
+        pm2 save
+    fi
 fi
 
 # Verify application is running

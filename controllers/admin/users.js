@@ -174,7 +174,8 @@ exports.updateUser = asyncHandler(async (req, res, next) => {
 // @access  Private/Admin
 exports.deleteUser = asyncHandler(async (req, res, next) => {
   // Prevent deleting your own account
-  if (req.params.id === req.user.id) {
+  const userToDeleteId = parseInt(req.params.id);
+  if (userToDeleteId === parseInt(req.user.id)) {
     return next(
       new ErrorResponse('You cannot delete your own account', 400)
     );
@@ -182,30 +183,33 @@ exports.deleteUser = asyncHandler(async (req, res, next) => {
 
   const user = await prisma.user.findUnique({
     where: {
-      id: req.params.id,
+      id: userToDeleteId,
     },
   });
 
   if (!user) {
     return next(
-      new ErrorResponse(`User not found with id of ${req.params.id}`, 404)
+      new ErrorResponse(`User not found with id of ${userToDeleteId}`, 404)
     );
   }
 
   // Delete related records first (FileAccess, Checkpoints, etc.)
   await prisma.$transaction([
     prisma.fileAccess.deleteMany({
-      where: { userId: req.params.id },
+      where: { userId: userToDeleteId },
     }),
     prisma.checkpoint.deleteMany({
-      where: { userId: req.params.id },
+      where: { userId: userToDeleteId },    
+    }),
+    prisma.activeSession.deleteMany({
+      where: { userId: userToDeleteId },
     }),
   ]);
 
   // Then delete the user
   await prisma.user.delete({
     where: {
-      id: req.params.id,
+      id: userToDeleteId,
     },
   });
 

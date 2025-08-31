@@ -28,7 +28,7 @@ info() {
 # Database configuration
 DB_NAME="secure_audio"
 DB_USER="secure_audio_user"
-DB_PASSWORD="SecureAudio2024!@#"  # Static password for consistency
+DB_PASSWORD="SecureAudio2024"  # Simplified password without special characters
 
 log "Setting up PostgreSQL database..."
 
