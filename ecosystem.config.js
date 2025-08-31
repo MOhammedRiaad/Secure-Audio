@@ -7,7 +7,7 @@ module.exports = {
       "exec_mode": "fork",
       "env": {
         "NODE_ENV": "production",
-        "NODE_OPTIONS": "--max-old-space-size=1024 --expose-gc",
+        "NODE_OPTIONS": "--max-old-space-size=1024",
         "UV_THREADPOOL_SIZE": 8
       },
       "max_memory_restart": "1800M",
