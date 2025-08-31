@@ -10,6 +10,7 @@ const {
 } = require('../controllers/audioFiles');
 const upload = require('../middleware/upload');
 const { imageUpload } = require('../middleware/imageUpload');
+const { streamingLimiter } = require('../middleware/rateLimiter');
 
 const largeFileUploadHandler = require('../middleware/largeFileUpload');
 
