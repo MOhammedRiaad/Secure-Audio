@@ -1,423 +1,339 @@
-const fs = require('fs').promises;
+const fs = require('fs');
 const path = require('path');
-const cron = require('node-cron');
 const { PrismaClient } = require('@prisma/client');
+const performanceConfig = require('../config/performance');
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  log: ['error', 'warn'],
+  errorFormat: 'pretty'
+});
 
 class ChunkCleanupService {
   constructor() {
     this.isRunning = false;
-    this.cleanupJob = null;
-    
-    // Default cleanup settings
-    this.settings = {
-      // Clean up chunks older than 24 hours
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
-      
-      // Run cleanup every 6 hours
-      cronSchedule: '0 */6 * * *', // Every 6 hours
-      
-      // Temporary chunk upload directory (NOT the main uploads directory)
-      chunksDir: process.env.CHUNKS_UPLOAD_PATH || path.join(process.cwd(), 'chunks'),
-      
-      // Metadata directory for temporary upload metadata
-      metadataDir: path.join(process.cwd(), 'uploads', 'metadata'),
-      
-      // Maximum number of files to clean per run
-      maxFilesPerRun: 100,
-      
-      // IMPORTANT: Main uploads directory is NEVER cleaned by this service
-      // The main encrypted audio files are stored in process.env.FILE_UPLOAD_PATH || './uploads'
-      // and should NEVER be deleted by the cleanup service
+    this.cleanupInterval = null;
+    this.lastCleanup = null;
+    this.cleanupStats = {
+      totalRuns: 0,
+      totalChunksCleaned: 0,
+      totalTempFilesCleaned: 0,
+      totalSizeFreed: 0,
+      lastRunTime: null,
+      errors: []
     };
+    
+    // Start scheduled cleanup
+    this.startScheduledCleanup();
   }
 
-  /**
-   * Start the cleanup service
-   */
-  start() {
+  // Start scheduled cleanup service
+  startScheduledCleanup() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+    
+    // Run cleanup every 30 minutes
+    this.cleanupInterval = setInterval(() => {
+      this.runScheduledCleanup();
+    }, 30 * 60 * 1000); // 30 minutes
+    
+    console.log('🕐 Scheduled chunk cleanup service started (every 30 minutes)');
+    
+    // Run initial cleanup after 5 minutes
+    setTimeout(() => {
+      this.runScheduledCleanup();
+    }, 5 * 60 * 1000);
+  }
+
+  // Run scheduled cleanup
+  async runScheduledCleanup() {
     if (this.isRunning) {
-      console.log('Chunk cleanup service is already running');
+      console.log('⏳ Cleanup already running, skipping scheduled run');
       return;
     }
-
-    console.log('Starting chunk cleanup service...');
     
-    // Schedule periodic cleanup
-    this.cleanupJob = cron.schedule(this.settings.cronSchedule, async () => {
-      try {
-        await this.performCleanup();
-      } catch (error) {
-        console.error('Error during scheduled cleanup:', error);
-      }
-    }, {
-      scheduled: false
-    });
+    console.log('🕐 Running scheduled cleanup...');
+    await this.cleanupAll();
+  }
 
-    this.cleanupJob.start();
+  // Stop scheduled cleanup service
+  stopScheduledCleanup() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+      console.log('🛑 Scheduled chunk cleanup service stopped');
+    }
+  }
+
+  // Clean up all types of temporary files
+  async cleanupAll() {
+    if (this.isRunning) {
+      console.log('⏳ Cleanup already running');
+      return;
+    }
+    
     this.isRunning = true;
-    
-    console.log(`Chunk cleanup service started. Next cleanup scheduled: ${this.settings.cronSchedule}`);
-    
-    // Perform initial cleanup
-    this.performCleanup().catch(error => {
-      console.error('Error during initial cleanup:', error);
-    });
-  }
-
-  /**
-   * Stop the cleanup service
-   */
-  stop() {
-    if (!this.isRunning) {
-      console.log('Chunk cleanup service is not running');
-      return;
-    }
-
-    if (this.cleanupJob) {
-      this.cleanupJob.stop();
-      this.cleanupJob = null;
-    }
-
-    this.isRunning = false;
-    console.log('Chunk cleanup service stopped');
-  }
-
-  /**
-   * Perform cleanup of expired chunks and metadata
-   * IMPORTANT: This only cleans temporary chunk files and metadata,
-   * NEVER the main encrypted audio files in the uploads directory
-   */
-  async performCleanup() {
-    console.log('Starting chunk cleanup process (temporary files only)...');
-    console.log(`Cleaning chunks directory: ${this.settings.chunksDir}`);
-    console.log('IMPORTANT: Main encrypted audio files in uploads directory are preserved');
-    
     const startTime = Date.now();
-    let cleanedFiles = 0;
-    let cleanedDirs = 0;
-    let errors = 0;
-
+    
     try {
-      // Clean up expired upload sessions from database
-      const expiredSessions = await this.cleanupExpiredSessions();
+      console.log('🧹 Starting comprehensive cleanup process...');
       
-      // Clean up orphaned chunk files (temporary files only)
-      const orphanedChunks = await this.cleanupOrphanedChunks();
+      // Clean up chunk upload sessions
+      const chunkResults = await this.cleanupChunkSessions();
       
-      // Clean up empty directories
-      const emptyDirs = await this.cleanupEmptyDirectories();
+      // Clean up temp folders
+      const tempResults = await this.cleanupTempFolders();
       
-      cleanedFiles = expiredSessions.deletedChunks + orphanedChunks;
-      cleanedDirs = emptyDirs;
+      // Clean up orphaned files
+      const orphanedResults = await this.cleanupOrphanedFiles();
       
-      const duration = Date.now() - startTime;
+      // Update stats
+      this.cleanupStats.totalRuns++;
+      this.cleanupStats.totalChunksCleaned += chunkResults.chunksCleaned;
+      this.cleanupStats.totalTempFilesCleaned += tempResults.filesCleaned;
+      this.cleanupStats.totalSizeFreed += chunkResults.sizeFreed + tempResults.sizeFreed + orphanedResults.sizeFreed;
+      this.cleanupStats.lastRunTime = new Date();
       
-      console.log(`Chunk cleanup completed in ${duration}ms:`);
-      console.log(`- Expired sessions: ${expiredSessions.deletedSessions}`);
-      console.log(`- Cleaned chunk files: ${cleanedFiles}`);
-      console.log(`- Cleaned directories: ${cleanedDirs}`);
-      console.log(`- Errors: ${errors}`);
+      const totalSizeMB = (this.cleanupStats.totalSizeFreed / 1024 / 1024).toFixed(2);
+      const runTime = Date.now() - startTime;
+      
+      console.log(`🎉 Comprehensive cleanup completed in ${runTime}ms`);
+      console.log(`📊 Total stats: ${this.cleanupStats.totalRuns} runs, ${totalSizeMB}MB freed`);
+      console.log(`📊 This run: ${chunkResults.chunksCleaned} chunks, ${tempResults.filesCleaned} temp files, ${orphanedResults.filesCleaned} orphaned files`);
       
     } catch (error) {
-      console.error('Error during cleanup process:', error);
-      errors++;
+      console.error('❌ Comprehensive cleanup error:', error);
+      this.cleanupStats.errors.push({
+        timestamp: new Date(),
+        error: error.message
+      });
+    } finally {
+      this.isRunning = false;
+      this.lastCleanup = Date.now();
     }
-
-    return {
-      cleanedFiles,
-      cleanedDirs,
-      errors,
-      duration: Date.now() - startTime
-    };
   }
 
-  /**
-   * Clean up expired upload sessions from database
-   */
-  async cleanupExpiredSessions() {
-    const cutoffTime = new Date(Date.now() - this.settings.maxAge);
+  // Clean up temp folders (chapters, uploads, etc.)
+  async cleanupTempFolders() {
+    console.log('🧹 Cleaning up temp folders...');
+    
+    const tempPaths = [
+      path.join(process.env.FILE_UPLOAD_PATH, performanceConfig.chapters.tempPath),
+      path.join(process.env.FILE_UPLOAD_PATH, 'temp'),
+      path.join(process.env.FILE_UPLOAD_PATH, 'uploads', 'temp')
+    ];
+    
+    let totalCleaned = 0;
+    let totalSize = 0;
+    
+    for (const tempPath of tempPaths) {
+      if (fs.existsSync(tempPath)) {
+        try {
+          const results = await this.cleanupDirectory(tempPath, 'temp_');
+          totalCleaned += results.filesCleaned;
+          totalSize += results.sizeFreed;
+        } catch (error) {
+          console.warn(`⚠️ Failed to clean temp path ${tempPath}:`, error.message);
+        }
+      }
+    }
+    
+    console.log(`🧹 Temp folders cleanup: ${totalCleaned} files (${(totalSize / 1024 / 1024).toFixed(2)}MB) freed`);
+    
+    return { filesCleaned: totalCleaned, sizeFreed: totalSize };
+  }
+
+  // Clean up orphaned files (files without database records)
+  async cleanupOrphanedFiles() {
+    console.log('🧹 Cleaning up orphaned files...');
+    
+    const uploadPath = process.env.FILE_UPLOAD_PATH;
+    const chaptersPath = path.join(uploadPath, performanceConfig.chapters.chapterStoragePath);
+    
+    let totalCleaned = 0;
+    let totalSize = 0;
+    
+    // Clean orphaned chapter files
+    if (fs.existsSync(chaptersPath)) {
+      try {
+        const results = await this.cleanupOrphanedChapters(chaptersPath);
+        totalCleaned += results.filesCleaned;
+        totalSize += results.sizeFreed;
+      } catch (error) {
+        console.warn('⚠️ Failed to clean orphaned chapters:', error.message);
+      }
+    }
+    
+    console.log(`🧹 Orphaned files cleanup: ${totalCleaned} files (${(totalSize / 1024 / 1024).toFixed(2)}MB) freed`);
+    
+    return { filesCleaned: totalCleaned, sizeFreed: totalSize };
+  }
+
+  // Clean up orphaned chapter files
+  async cleanupOrphanedChapters(chaptersPath) {
+    const chapterFiles = fs.readdirSync(chaptersPath);
+    let cleaned = 0;
+    let sizeFreed = 0;
+    
+    for (const chapterFile of chapterFiles) {
+      if (chapterFile.endsWith('.enc')) {
+        try {
+          // Extract chapter ID from filename
+          const match = chapterFile.match(/chapter_(\d+)_(\d+)_/);
+          if (match) {
+            const [, fileId, chapterId] = match;
+            
+            // Check if chapter exists in database
+            const chapter = await prisma.audioChapter.findFirst({
+              where: {
+                id: parseInt(chapterId),
+                fileId: parseInt(fileId)
+              }
+            });
+            
+            if (!chapter) {
+              // Orphaned file, clean it up
+              const filePath = path.join(chaptersPath, chapterFile);
+              const stats = fs.statSync(filePath);
+              fs.unlinkSync(filePath);
+              sizeFreed += stats.size;
+              cleaned++;
+              console.log(`🧹 Cleaned orphaned chapter file: ${chapterFile} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+            }
+          }
+        } catch (error) {
+          console.warn(`⚠️ Failed to process chapter file ${chapterFile}:`, error.message);
+        }
+      }
+    }
+    
+    return { filesCleaned: cleaned, sizeFreed };
+  }
+
+  // Clean up expired chunk upload sessions
+  async cleanupChunkSessions() {
+    console.log('🧹 Cleaning up expired chunk upload sessions...');
     
     try {
-      // Find expired upload sessions
+      const cutoffTime = new Date(Date.now() - (24 * 60 * 60 * 1000)); // 24 hours ago
+      
+      // Find expired sessions
       const expiredSessions = await prisma.chunkUploadSession.findMany({
         where: {
           OR: [
-            {
-              createdAt: {
-                lt: cutoffTime
-              }
-            },
-            {
-              status: 'failed',
-              updatedAt: {
-                lt: new Date(Date.now() - (2 * 60 * 60 * 1000)) // 2 hours for failed uploads
-              }
+            { createdAt: { lt: cutoffTime } },
+            { 
+              status: 'failed', 
+              updatedAt: { lt: new Date(Date.now() - (2 * 60 * 60 * 1000)) } // 2 hours for failed
             }
           ]
-        },
-        take: this.settings.maxFilesPerRun
+        }
       });
-
-      let deletedChunks = 0;
+      
+      let chunksCleaned = 0;
+      let sizeFreed = 0;
       
       for (const session of expiredSessions) {
         try {
-          // Delete chunk files for this session
-          const sessionChunksDir = path.join(this.settings.chunksDir, session.uploadId);
-          const chunkCount = await this.deleteDirectory(sessionChunksDir);
-          deletedChunks += chunkCount;
+          // Clean up chunk files
+          const chunksDir = path.join(process.env.CHUNKS_UPLOAD_PATH || './chunks', session.uploadId);
+          if (fs.existsSync(chunksDir)) {
+            const results = await this.cleanupDirectory(chunksDir);
+            chunksCleaned += results.filesCleaned;
+            sizeFreed += results.sizeFreed;
+          }
           
-          // Delete metadata file
-          const metadataFile = path.join(this.settings.metadataDir, `${session.uploadId}.json`);
-          await this.deleteFile(metadataFile);
+          // Clean up metadata
+          const metadataFile = path.join('./uploads/metadata', `${session.uploadId}.json`);
+          if (fs.existsSync(metadataFile)) {
+            const stats = fs.statSync(metadataFile);
+            fs.unlinkSync(metadataFile);
+            sizeFreed += stats.size;
+          }
           
         } catch (error) {
-          console.error(`Error cleaning session ${session.uploadId}:`, error);
+          console.warn(`⚠️ Failed to clean session ${session.uploadId}:`, error.message);
         }
       }
-
+      
       // Delete expired sessions from database
-      const deleteResult = await prisma.chunkUploadSession.deleteMany({
-        where: {
-          uploadId: {
-            in: expiredSessions.map(s => s.uploadId)
+      if (expiredSessions.length > 0) {
+        await prisma.chunkUploadSession.deleteMany({
+          where: {
+            uploadId: {
+              in: expiredSessions.map(s => s.uploadId)
+            }
           }
-        }
-      });
-
-      return {
-        deletedSessions: deleteResult.count,
-        deletedChunks
-      };
+        });
+      }
+      
+      console.log(`🧹 Chunk sessions cleanup: ${chunksCleaned} chunks, ${expiredSessions.length} sessions (${(sizeFreed / 1024 / 1024).toFixed(2)}MB) freed`);
+      
+      return { chunksCleaned, sizeFreed };
       
     } catch (error) {
-      console.error('Error cleaning expired sessions:', error);
-      return { deletedSessions: 0, deletedChunks: 0 };
+      console.error('❌ Chunk sessions cleanup error:', error);
+      return { chunksCleaned: 0, sizeFreed: 0 };
     }
   }
 
-  /**
-   * Clean up orphaned chunk files (files without corresponding database entries)
-   */
-  async cleanupOrphanedChunks() {
-    let deletedFiles = 0;
+  // Clean up a specific directory
+  async cleanupDirectory(dirPath, filePrefix = '') {
+    if (!fs.existsSync(dirPath)) {
+      return { filesCleaned: 0, sizeFreed: 0 };
+    }
     
-    try {
-      // SAFETY CHECK: Ensure we're only cleaning the chunks directory
-      const chunksDir = this.settings.chunksDir;
-      console.log(`Cleaning orphaned chunks from: ${chunksDir}`);
-      
-      // Verify this is actually the chunks directory and not the main uploads
-      if (chunksDir.includes('uploads') && !chunksDir.includes('chunks')) {
-        console.error('SAFETY ERROR: Attempted to clean main uploads directory. Aborting.');
-        return deletedFiles;
-      }
-      
-      // Check if chunks directory exists
-      const chunksExist = await this.directoryExists(chunksDir);
-      if (!chunksExist) {
-        console.log('Chunks directory does not exist, skipping cleanup');
-        return deletedFiles;
-      }
-
-      const uploadDirs = await fs.readdir(chunksDir);
-      
-      for (const uploadId of uploadDirs) {
+    const files = fs.readdirSync(dirPath);
+    let cleaned = 0;
+    let sizeFreed = 0;
+    
+    for (const file of files) {
+      if (filePrefix === '' || file.startsWith(filePrefix)) {
+        const filePath = path.join(dirPath, file);
         try {
-          // Check if this upload session exists in database
-          const session = await prisma.chunkUploadSession.findUnique({
-            where: { uploadId }
-          });
+          const stats = fs.statSync(filePath);
           
-          if (!session) {
-            // Orphaned directory - delete it (temporary chunks only)
-            const uploadDir = path.join(this.settings.chunksDir, uploadId);
-            const fileCount = await this.deleteDirectory(uploadDir);
-            deletedFiles += fileCount;
-            
-            console.log(`Deleted orphaned chunk directory: ${uploadId} (${fileCount} temporary files)`);
+          // Clean up files older than 1 hour
+          const oneHourAgo = Date.now() - (60 * 60 * 1000);
+          if (stats.mtime.getTime() < oneHourAgo) {
+            fs.unlinkSync(filePath);
+            sizeFreed += stats.size;
+            cleaned++;
           }
-          
         } catch (error) {
-          console.error(`Error checking upload directory ${uploadId}:`, error);
+          console.warn(`⚠️ Failed to process file ${file}:`, error.message);
         }
       }
-      
-    } catch (error) {
-      console.error('Error cleaning orphaned chunks:', error);
     }
     
-    return deletedFiles;
-  }
-
-  /**
-   * Clean up empty directories
-   */
-  async cleanupEmptyDirectories() {
-    let deletedDirs = 0;
-    
+    // Try to remove empty directory
     try {
-      // Clean chunks directory
-      deletedDirs += await this.removeEmptyDirectories(this.settings.chunksDir);
-      
-      // Clean metadata directory
-      deletedDirs += await this.removeEmptyDirectories(this.settings.metadataDir);
-      
-    } catch (error) {
-      console.error('Error cleaning empty directories:', error);
-    }
-    
-    return deletedDirs;
-  }
-
-  /**
-   * Remove empty directories recursively
-   */
-  async removeEmptyDirectories(dirPath) {
-    let deletedCount = 0;
-    
-    try {
-      const exists = await this.directoryExists(dirPath);
-      if (!exists) {
-        return deletedCount;
-      }
-
-      const items = await fs.readdir(dirPath);
-      
-      for (const item of items) {
-        const itemPath = path.join(dirPath, item);
-        const stats = await fs.stat(itemPath);
-        
-        if (stats.isDirectory()) {
-          // Recursively clean subdirectory
-          deletedCount += await this.removeEmptyDirectories(itemPath);
-          
-          // Check if directory is now empty
-          const subItems = await fs.readdir(itemPath);
-          if (subItems.length === 0) {
-            await fs.rmdir(itemPath);
-            deletedCount++;
-            console.log(`Removed empty directory: ${itemPath}`);
-          }
-        }
-      }
-      
-    } catch (error) {
-      console.error(`Error removing empty directories from ${dirPath}:`, error);
-    }
-    
-    return deletedCount;
-  }
-
-  /**
-   * Delete a directory and all its contents
-   */
-  async deleteDirectory(dirPath) {
-    let deletedFiles = 0;
-    
-    try {
-      const exists = await this.directoryExists(dirPath);
-      if (!exists) {
-        return deletedFiles;
-      }
-
-      const items = await fs.readdir(dirPath);
-      
-      for (const item of items) {
-        const itemPath = path.join(dirPath, item);
-        const stats = await fs.stat(itemPath);
-        
-        if (stats.isDirectory()) {
-          deletedFiles += await this.deleteDirectory(itemPath);
-        } else {
-          await fs.unlink(itemPath);
-          deletedFiles++;
-        }
-      }
-      
-      await fs.rmdir(dirPath);
-      
-    } catch (error) {
-      console.error(`Error deleting directory ${dirPath}:`, error);
-    }
-    
-    return deletedFiles;
-  }
-
-  /**
-   * Delete a single file
-   */
-  async deleteFile(filePath) {
-    try {
-      const exists = await this.fileExists(filePath);
-      if (exists) {
-        await fs.unlink(filePath);
-        return true;
+      const remainingFiles = fs.readdirSync(dirPath);
+      if (remainingFiles.length === 0) {
+        fs.rmdirSync(dirPath);
+        console.log(`🧹 Removed empty directory: ${dirPath}`);
       }
     } catch (error) {
-      console.error(`Error deleting file ${filePath}:`, error);
+      // Directory not empty or permission issue - that's fine
     }
-    return false;
+    
+    return { filesCleaned: cleaned, sizeFreed };
   }
 
-  /**
-   * Check if a file exists
-   */
-  async fileExists(filePath) {
-    try {
-      await fs.access(filePath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Check if a directory exists
-   */
-  async directoryExists(dirPath) {
-    try {
-      const stats = await fs.stat(dirPath);
-      return stats.isDirectory();
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Manual cleanup trigger (for API endpoint)
-   * IMPORTANT: This only cleans temporary chunk files and metadata,
-   * NEVER the main encrypted audio files in the uploads directory
-   */
-  async manualCleanup() {
-    console.log('Manual cleanup triggered - cleaning temporary files only');
-    return await this.performCleanup();
-  }
-
-  /**
-   * Get cleanup service status
-   */
+  // Get cleanup service status
   getStatus() {
     return {
       isRunning: this.isRunning,
-      settings: this.settings,
-      nextRun: this.cleanupJob ? this.cleanupJob.nextDate() : null
+      lastCleanup: this.lastCleanup,
+      nextCleanup: this.lastCleanup ? new Date(this.lastCleanup.getTime() + (30 * 60 * 1000)) : null,
+      stats: this.cleanupStats
     };
   }
 
-  /**
-   * Update cleanup settings
-   */
-  updateSettings(newSettings) {
-    this.settings = { ...this.settings, ...newSettings };
-    
-    // Restart service if running to apply new schedule
-    if (this.isRunning) {
-      this.stop();
-      this.start();
-    }
+  // Manual cleanup trigger
+  async manualCleanup() {
+    console.log('🧹 Manual cleanup triggered');
+    return await this.cleanupAll();
   }
 }
 

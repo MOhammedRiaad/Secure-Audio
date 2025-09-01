@@ -9,12 +9,14 @@ const fs = require('fs');
 const crypto = require('crypto');
 const performanceConfig = require('../config/performance');
 const jwt = require('jsonwebtoken');
+const MemoryMonitor = require('../utils/memoryMonitor');
 
 const prisma = new PrismaClient({
   log: ['error', 'warn'],
   errorFormat: 'pretty'
 });
 const drm = new AudioDRM();
+const memoryMonitor = new MemoryMonitor();
 
 // @desc    Get chapters for an audio file
 // @route   GET /api/v1/files/:fileId/chapters
@@ -325,7 +327,9 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
   const finalizedChapters = [];
   const errors = [];
   let totalProcessed = 0;
-  const maxConcurrent = performanceConfig.chapters.maxConcurrentChapters;
+  
+  // Reduce concurrent processing for 2GB server
+  const maxConcurrent = Math.min(performanceConfig.chapters.maxConcurrentChapters, 1); // Force single-threaded
 
   try {
     
@@ -333,78 +337,145 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
     for (let i = 0; i < file.chapters.length; i += maxConcurrent) {
       const batch = file.chapters.slice(i, i + maxConcurrent);
       
+      // Check memory before processing batch
+      console.log(`📊 Memory check before processing batch ${Math.floor(i / maxConcurrent) + 1}/${Math.ceil(file.chapters.length / maxConcurrent)}`);
+      memoryMonitor.logMemoryStatus(`Chapter Finalization - Batch ${Math.floor(i / maxConcurrent) + 1}`);
+      
       const batchPromises = batch.map(async (chapter) => {
         try {
+          console.log(`🔐 Processing chapter: ${chapter.label} (${chapter.startTime}s - ${chapter.endTime || 'end'}s)`);
           
-          // Extract audio segment from master file
-          const segmentBuffer = await drm.extractAudioSegment(
-            masterFilePath,
-            chapter.startTime,
-            chapter.endTime,
-            file.encryptionKey
-          );
-          
-          
-          // Encrypt the individual chapter segment
-          const encryptionResult = drm.encryptChapterSegment(segmentBuffer);
-          
-          
-          // Intelligent storage strategy based on size
-          let selectedStorageType = storageType || performanceConfig.chapters.defaultStorageType;
-          
-          if (!storageType) {
-            // Auto-select based on size thresholds
-            if (encryptionResult.encryptedSize <= performanceConfig.chapters.databaseStorageThreshold) {
-              selectedStorageType = 'database';
-            } else {
-              selectedStorageType = 'filesystem';
+          // Memory check before processing each chapter
+          const memoryStatus = memoryMonitor.isMemorySafe();
+          if (!memoryStatus.safe) {
+            console.warn(`⚠️ Memory usage is ${memoryStatus.level} before processing chapter ${chapter.label}`);
+            if (memoryStatus.level === 'critical') {
+              console.log('🚨 Critical memory usage, forcing garbage collection...');
+              memoryMonitor.forceGarbageCollection();
+              
+              // Wait for memory to become safe
+              const safe = await memoryMonitor.waitForSafeMemory(10000);
+              if (!safe) {
+                throw new Error('Memory usage too high to safely process chapter');
+              }
             }
           }
           
-          // Prepare update data
+          // Create temporary file path for this chapter
+          const tempChapterPath = path.join(
+            process.env.FILE_UPLOAD_PATH, 
+            performanceConfig.chapters.tempPath, 
+            `temp_chapter_${fileId}_${chapter.id}_${Date.now()}.mp3`
+          );
+          
+          // Ensure temp directory exists
+          const tempDir = path.dirname(tempChapterPath);
+          if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+          }
+          
+          // STEP 1: Extract audio segment to temporary file (streaming, no memory load)
+          console.log(`📁 Extracting chapter to temp file: ${tempChapterPath}`);
+          
+          const extractionResult = await drm.processChapterStream(
+            masterFilePath,
+            chapter.startTime,
+            chapter.endTime,
+            file.encryptionKey,
+            tempChapterPath
+          );
+          
+          if (!extractionResult.success) {
+            throw new Error('Failed to extract audio segment');
+          }
+          
+          console.log(`✅ Chapter extracted: ${(extractionResult.size / 1024 / 1024).toFixed(2)}MB`);
+          
+          // Memory check after extraction
+          memoryMonitor.logMemoryStatus(`After Chapter Extraction - ${chapter.label}`);
+          
+          // STEP 2: Encrypt the temporary file (streaming encryption)
+          console.log(`🔐 Encrypting chapter segment...`);
+          const encryptionResult = await drm.encryptChapterSegmentFromFile(tempChapterPath);
+          
+          console.log(`✅ Chapter encrypted: ${(encryptionResult.encryptedSize / 1024 / 1024).toFixed(2)}MB`);
+          
+          // Memory check after encryption
+          memoryMonitor.logMemoryStatus(`After Chapter Encryption - ${chapter.label}`);
+          
+          // STEP 3: Move encrypted file to final location
+          const finalChapterPath = path.join(
+            process.env.FILE_UPLOAD_PATH, 
+            performanceConfig.chapters.chapterStoragePath, 
+            `chapter_${fileId}_${chapter.id}_${Date.now()}.enc`
+          );
+          
+          // Ensure chapters directory exists
+          const chaptersDir = path.dirname(finalChapterPath);
+          if (!fs.existsSync(chaptersDir)) {
+            fs.mkdirSync(chaptersDir, { recursive: true });
+          }
+          
+          // Move encrypted file to final location
+          fs.renameSync(encryptionResult.encryptedPath, finalChapterPath);
+          
+          // STEP 4: Update database with file-based storage
           const updateData = {
             status: 'ready',
             encryptionKey: encryptionResult.key,
             encryptionIV: encryptionResult.iv,
             encryptionTag: encryptionResult.authTag,
+            encryptedPath: path.relative(process.env.FILE_UPLOAD_PATH, finalChapterPath),
             plainSize: encryptionResult.plainSize,
             encryptedSize: encryptionResult.encryptedSize,
             finalizedAt: new Date()
           };
           
-          // Handle storage based on strategy
-          if (selectedStorageType === 'filesystem') {
-            // Save encrypted chapter to filesystem
-            const chapterFileName = `chapter_${fileId}_${chapter.id}_${Date.now()}.enc`;
-            const chapterFilePath = path.join(process.env.FILE_UPLOAD_PATH, performanceConfig.chapters.chapterStoragePath, chapterFileName);
-            
-            // Ensure chapters directory exists
-            const chaptersDir = path.dirname(chapterFilePath);
-            if (!fs.existsSync(chaptersDir)) {
-              fs.mkdirSync(chaptersDir, { recursive: true });
-            }
-            
-            fs.writeFileSync(chapterFilePath, encryptionResult.encryptedData);
-            updateData.encryptedPath = path.join(performanceConfig.chapters.chapterStoragePath, chapterFileName);
-            
-          } else {
-            // Store encrypted data directly in database (BYTEA)
-            updateData.encryptedData = encryptionResult.encryptedData;
-            
-          }
-          
-          // Update chapter record
           const updatedChapter = await prisma.audioChapter.update({
             where: { id: chapter.id },
             data: updateData
           });
           
-          // Trigger garbage collection for large operations
-          if (performanceConfig.memory.enableGcHints && 
-              encryptionResult.encryptedSize > performanceConfig.memory.gcThreshold) {
-            if (global.gc) {
-              global.gc();
+          console.log(`💾 Chapter stored: ${updatedChapter.encryptedPath}`);
+          
+          // Force garbage collection after each chapter to free memory
+          if (global.gc) {
+            global.gc();
+            console.log(`🗑️ Garbage collection triggered for chapter ${chapter.label}`);
+          }
+          
+          // Final memory check for this chapter
+          memoryMonitor.logMemoryStatus(`Chapter Complete - ${chapter.label}`);
+          
+          // IMMEDIATE CHAPTER CLEANUP
+          try {
+            // Clean up any temp files related to this specific chapter
+            const tempDir = path.join(process.env.FILE_UPLOAD_PATH, performanceConfig.chapters.tempPath);
+            if (fs.existsSync(tempDir)) {
+              const tempFiles = fs.readdirSync(tempDir);
+              let chapterCleaned = 0;
+              let chapterSize = 0;
+              
+              for (const tempFile of tempFiles) {
+                if (tempFile.includes(`temp_chapter_${fileId}_${chapter.id}_`)) {
+                  const tempFilePath = path.join(tempDir, tempFile);
+                  try {
+                    const stats = fs.statSync(tempFilePath);
+                    chapterSize += stats.size;
+                    fs.unlinkSync(tempFilePath);
+                    chapterCleaned++;
+                  } catch (cleanupError) {
+                    console.warn(`⚠️ Failed to clean chapter temp file ${tempFile}:`, cleanupError.message);
+                  }
+                }
+              }
+              
+              if (chapterCleaned > 0) {
+                console.log(`🧹 Chapter cleanup: ${chapterCleaned} temp files (${(chapterSize / 1024 / 1024).toFixed(2)}MB) freed for ${chapter.label}`);
+              }
             }
+          } catch (cleanupError) {
+            console.warn(`⚠️ Chapter cleanup failed for ${chapter.label}:`, cleanupError.message);
           }
           
           return {
@@ -415,7 +486,7 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
               status: updatedChapter.status,
               plainSize: updatedChapter.plainSize,
               encryptedSize: updatedChapter.encryptedSize,
-              storageType: selectedStorageType,
+              storageType: 'filesystem',
               finalizedAt: updatedChapter.finalizedAt
             }
           };
@@ -453,10 +524,54 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
         totalProcessed++;
       });
       
+      // Memory check after batch completion
+      console.log(`📊 Memory check after completing batch ${Math.floor(i / maxConcurrent) + 1}`);
+      memoryMonitor.logMemoryStatus(`Batch Complete - ${Math.floor(i / maxConcurrent) + 1}`);
       
-      // Brief pause between batches to prevent overwhelming the system
+      // BATCH CLEANUP
+      try {
+        const tempDir = path.join(process.env.FILE_UPLOAD_PATH, performanceConfig.chapters.tempPath);
+        if (fs.existsSync(tempDir)) {
+          const tempFiles = fs.readdirSync(tempDir);
+          let batchCleaned = 0;
+          let batchSize = 0;
+          
+          for (const tempFile of tempFiles) {
+            if (tempFile.includes(`temp_chapter_${fileId}_`)) {
+              const tempFilePath = path.join(tempDir, tempFile);
+              try {
+                const stats = fs.statSync(tempFilePath);
+                batchSize += stats.size;
+                fs.unlinkSync(tempFilePath);
+                batchCleaned++;
+              } catch (cleanupError) {
+                console.warn(`⚠️ Failed to clean batch temp file ${tempFile}:`, cleanupError.message);
+              }
+            }
+          }
+          
+          if (batchCleaned > 0) {
+            console.log(`🧹 Batch cleanup: ${batchCleaned} temp files (${(batchSize / 1024 / 1024).toFixed(2)}MB) freed after batch ${Math.floor(i / maxConcurrent) + 1}`);
+          }
+        }
+      } catch (cleanupError) {
+        console.warn('⚠️ Batch cleanup failed:', cleanupError.message);
+      }
+      
+      // Longer pause between batches for 2GB server
       if (i + maxConcurrent < file.chapters.length) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        console.log(`⏸️ Pausing between batches to allow memory cleanup...`);
+        
+        // Force garbage collection between batches
+        if (global.gc) {
+          global.gc();
+          console.log('🗑️ Batch cleanup: Garbage collection triggered');
+        }
+        
+        // Wait for memory to stabilize
+        await memoryMonitor.waitForSafeMemory(5000);
+        
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second pause
       }
     }
     
@@ -469,6 +584,75 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
       return acc;
     }, {});
     
+    // COMPREHENSIVE TEMP FOLDER CLEANUP
+    console.log('🧹 Starting comprehensive temp folder cleanup...');
+    try {
+      const tempDir = path.join(process.env.FILE_UPLOAD_PATH, performanceConfig.chapters.tempPath);
+      
+      if (fs.existsSync(tempDir)) {
+        // Clean up any remaining temp files from this processing session
+        const tempFiles = fs.readdirSync(tempDir);
+        let cleanedCount = 0;
+        let cleanedSize = 0;
+        
+        for (const tempFile of tempFiles) {
+          // Only clean temp files related to this file processing
+          if (tempFile.includes(`temp_chapter_${fileId}_`)) {
+            const tempFilePath = path.join(tempDir, tempFile);
+            try {
+              const stats = fs.statSync(tempFilePath);
+              cleanedSize += stats.size;
+              fs.unlinkSync(tempFilePath);
+              cleanedCount++;
+              console.log(`🧹 Cleaned temp file: ${tempFile} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+            } catch (cleanupError) {
+              console.warn(`⚠️ Failed to clean temp file ${tempFile}:`, cleanupError.message);
+            }
+          }
+        }
+        
+        // Also clean up any orphaned temp files older than 1 hour
+        const oneHourAgo = Date.now() - (60 * 60 * 1000);
+        let orphanedCleaned = 0;
+        let orphanedSize = 0;
+        
+        for (const tempFile of tempFiles) {
+          if (tempFile.startsWith('temp_') && !tempFile.includes(`temp_chapter_${fileId}_`)) {
+            const tempFilePath = path.join(tempDir, tempFile);
+            try {
+              const stats = fs.statSync(tempFilePath);
+              if (stats.mtime.getTime() < oneHourAgo) {
+                cleanedSize += stats.size;
+                orphanedSize += stats.size;
+                fs.unlinkSync(tempFilePath);
+                orphanedCleaned++;
+                console.log(`🧹 Cleaned orphaned temp file: ${tempFile} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+              }
+            } catch (cleanupError) {
+              console.warn(`⚠️ Failed to clean orphaned temp file ${tempFile}:`, cleanupError.message);
+            }
+          }
+        }
+        
+        console.log(`🧹 Temp cleanup completed: ${cleanedCount} session files + ${orphanedCleaned} orphaned files = ${(cleanedSize / 1024 / 1024).toFixed(2)}MB freed`);
+        
+        // Try to remove empty temp directory if possible
+        try {
+          const remainingFiles = fs.readdirSync(tempDir);
+          if (remainingFiles.length === 0) {
+            fs.rmdirSync(tempDir);
+            console.log('🧹 Removed empty temp directory');
+          }
+        } catch (rmdirError) {
+          // Directory not empty or permission issue - that's fine
+          console.log('🧹 Temp directory not empty, keeping for future use');
+        }
+      }
+    } catch (cleanupError) {
+      console.warn('⚠️ Temp folder cleanup failed:', cleanupError.message);
+    }
+    
+    console.log(`🎉 Chapter finalization completed: ${successCount} success, ${errorCount} errors`);
     
     res.status(200).json({
       success: true,
@@ -482,7 +666,8 @@ exports.finalizeChapters = asyncHandler(async (req, res, next) => {
           failed: errorCount,
           storageDistribution: storageStats,
           processingTime: Date.now() - Date.now(), // This would need proper timing
-          maxConcurrentUsed: maxConcurrent
+          maxConcurrentUsed: maxConcurrent,
+          memoryOptimized: true
         }
       }
     });
@@ -876,3 +1061,103 @@ exports.generateChapterStreamUrl = asyncHandler(async (req, res, next) => {
     }
   });
 });
+
+// @desc    Clean up temp folders (utility function)
+// @route   POST /api/v1/chapters/cleanup-temp
+// @access  Admin only
+exports.cleanupTempFolders = asyncHandler(async (req, res, next) => {
+  // Admin only
+  if (req.user.role !== 'admin') {
+    return next(new ErrorResponse('Admin access required', 403));
+  }
+  
+  console.log('🧹 Admin-triggered temp folder cleanup...');
+  
+  try {
+    const tempDir = path.join(process.env.FILE_UPLOAD_PATH, performanceConfig.chapters.tempPath);
+    let totalCleaned = 0;
+    let totalSize = 0;
+    
+    if (fs.existsSync(tempDir)) {
+      const tempFiles = fs.readdirSync(tempDir);
+      
+      for (const tempFile of tempFiles) {
+        if (tempFile.startsWith('temp_')) {
+          const tempFilePath = path.join(tempDir, tempFile);
+          try {
+            const stats = fs.statSync(tempFilePath);
+            totalSize += stats.size;
+            fs.unlinkSync(tempFilePath);
+            totalCleaned++;
+            console.log(`🧹 Cleaned temp file: ${tempFile} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+          } catch (cleanupError) {
+            console.warn(`⚠️ Failed to clean temp file ${tempFile}:`, cleanupError.message);
+          }
+        }
+      }
+      
+      // Try to remove empty temp directory
+      try {
+        const remainingFiles = fs.readdirSync(tempDir);
+        if (remainingFiles.length === 0) {
+          fs.rmdirSync(tempDir);
+          console.log('🧹 Removed empty temp directory');
+        }
+      } catch (rmdirError) {
+        console.log('🧹 Temp directory not empty, keeping for future use');
+      }
+    }
+    
+    console.log(`🧹 Admin cleanup completed: ${totalCleaned} files (${(totalSize / 1024 / 1024).toFixed(2)}MB) freed`);
+    
+    res.status(200).json({
+      success: true,
+      message: `Temp cleanup completed: ${totalCleaned} files (${(totalSize / 1024 / 1024).toFixed(2)}MB) freed`,
+      data: {
+        filesCleaned: totalCleaned,
+        sizeFreed: totalSize,
+        sizeFreedMB: (totalSize / 1024 / 1024).toFixed(2)
+      }
+    });
+    
+  } catch (error) {
+    console.error('Temp cleanup error:', error);
+    return next(new ErrorResponse('Failed to cleanup temp folders', 500));
+  }
+});
+
+// Utility function to clean up temp folders (can be called from other modules)
+exports.cleanupTempFoldersUtil = async () => {
+  try {
+    const tempDir = path.join(process.env.FILE_UPLOAD_PATH, performanceConfig.chapters.tempPath);
+    let totalCleaned = 0;
+    let totalSize = 0;
+    
+    if (fs.existsSync(tempDir)) {
+      const tempFiles = fs.readdirSync(tempDir);
+      
+      for (const tempFile of tempFiles) {
+        if (tempFile.startsWith('temp_')) {
+          const tempFilePath = path.join(tempDir, tempFile);
+          try {
+            const stats = fs.statSync(tempFilePath);
+            totalSize += stats.size;
+            fs.unlinkSync(tempFilePath);
+            totalCleaned++;
+          } catch (cleanupError) {
+            console.warn(`⚠️ Failed to clean temp file ${tempFile}:`, cleanupError.message);
+          }
+        }
+      }
+      
+      if (totalCleaned > 0) {
+        console.log(`🧹 Utility cleanup: ${totalCleaned} temp files (${(totalSize / 1024 / 1024).toFixed(2)}MB) freed`);
+      }
+    }
+    
+    return { filesCleaned: totalCleaned, sizeFreed: totalSize };
+  } catch (error) {
+    console.error('Utility temp cleanup error:', error);
+    return { filesCleaned: 0, sizeFreed: 0, error: error.message };
+  }
+};
