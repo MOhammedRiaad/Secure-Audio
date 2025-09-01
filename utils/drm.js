@@ -398,19 +398,25 @@ class AudioDRM {
     });
   }
 
-  // Create decrypted stream for encrypted files (GCM format) - optimized for large files
+  // Create decrypted stream for encrypted files (GCM format) - OLD WORKING VERSION
   createDecryptedStream(encryptedFilePath, options) {
     try {
       const { key } = options;
-      const { Transform } = require('stream');
-      const performanceConfig = require('../config/performance');
       
-      // Get file size to determine streaming strategy
+      if (!key) {
+        throw new Error('DRM decryption key is required');
+      }
+      
+      // Get file size
       const stats = fs.statSync(encryptedFilePath);
       const fileSize = stats.size;
-      const isLargeFile = fileSize > performanceConfig.memory.maxBufferSize;
       
-      console.log(`🔐 Creating decrypted stream for ${isLargeFile ? 'large' : 'normal'} file: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+      console.log(`🔐 Creating decrypted stream for file: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+      
+      // Validate file size meets minimum DRM format requirements
+      if (fileSize < IV_LENGTH + TAG_LENGTH) {
+        throw new Error(`File too small for DRM format. Expected at least ${IV_LENGTH + TAG_LENGTH} bytes, got ${fileSize} bytes`);
+      }
       
       // Read auth tag from the end of the file
       const authTagBuffer = Buffer.alloc(TAG_LENGTH);
@@ -418,10 +424,13 @@ class AudioDRM {
       fs.readSync(fd, authTagBuffer, 0, TAG_LENGTH, fileSize - TAG_LENGTH);
       fs.closeSync(fd);
       
-      // Create a transform stream for decryption with optimized buffer settings
+      console.log(`🔐 Auth tag read: ${authTagBuffer.toString('hex')} (${authTagBuffer.length} bytes)`);
+      
+      // Create a transform stream for decryption
+      const { Transform } = require('stream');
+      
       const decryptTransform = new Transform({
-        // Use smaller high water mark for large files to reduce memory usage
-        highWaterMark: isLargeFile ? 16 * 1024 : 64 * 1024, // 16KB for large files, 64KB for normal
+        highWaterMark: 64 * 1024, // 64KB chunks
         
         transform(chunk, encoding, callback) {
           try {
@@ -441,6 +450,8 @@ class AudioDRM {
               chunk = chunk.slice(IV_LENGTH);
               this.headerExtracted = true;
               this.totalProcessed = IV_LENGTH;
+              
+              console.log(`🔐 IV extracted: ${this.fileIV.toString('hex')} (${this.fileIV.length} bytes)`);
               
               // Initialize decipher with the IV from the file
               this.decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), this.fileIV);
@@ -488,14 +499,10 @@ class AudioDRM {
         }
       });
       
-      // Create file read stream with optimized settings for large files
-      const readStreamOptions = {
-        highWaterMark: isLargeFile ? 32 * 1024 : 64 * 1024, // Smaller chunks for large files
-      };
+      // Create file read stream
+      const fileStream = fs.createReadStream(encryptedFilePath, { highWaterMark: 64 * 1024 });
       
-      const fileStream = fs.createReadStream(encryptedFilePath, readStreamOptions);
-      
-      // Add error handling and monitoring
+      // Add error handling
       fileStream.on('error', (error) => {
         console.error('🚨 File read stream error:', error);
       });
@@ -503,28 +510,6 @@ class AudioDRM {
       decryptTransform.on('error', (error) => {
         console.error('🚨 Decrypt transform error:', error);
       });
-      
-      // Monitor memory usage for large files
-      if (isLargeFile && performanceConfig.monitoring.enablePerformanceMetrics) {
-        const startTime = Date.now();
-        let bytesProcessed = 0;
-        
-        fileStream.on('data', (chunk) => {
-          bytesProcessed += chunk.length;
-        });
-        
-        fileStream.on('end', () => {
-          const duration = Date.now() - startTime;
-          const throughput = (bytesProcessed / 1024 / 1024) / (duration / 1000); // MB/s
-          console.log(`📊 Large file streaming completed: ${(bytesProcessed / 1024 / 1024).toFixed(2)}MB in ${duration}ms (${throughput.toFixed(2)} MB/s)`);
-          
-          // Trigger garbage collection hint for large files
-          if (performanceConfig.memory.enableGcHints && global.gc) {
-            global.gc();
-            console.log('🗑️ Garbage collection triggered after large file processing');
-          }
-        });
-      }
       
       return fileStream.pipe(decryptTransform);
       
@@ -590,7 +575,7 @@ class AudioDRM {
     }
   }
 
-  // Encrypt individual chapter segment with AES-256-GCM
+  // Encrypt individual chapter segment with AES-256-GCM - OLD WORKING VERSION
   encryptChapterSegment(audioBuffer) {
     try {
       const key = crypto.randomBytes(32);
@@ -619,7 +604,7 @@ class AudioDRM {
     }
   }
 
-  // Decrypt individual chapter segment
+  // Decrypt individual chapter segment - OLD WORKING VERSION
   decryptChapterSegment(encryptedData, key, iv, authTag) {
     try {
       const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), Buffer.from(iv, 'hex'));
@@ -636,7 +621,7 @@ class AudioDRM {
     }
   }
 
-  // Extract audio segment from master file using FFmpeg
+  // Extract audio segment from master file using FFmpeg - OLD WORKING VERSION
   async extractAudioSegment(masterFilePath, startTime, endTime, masterKey) {
     return new Promise((resolve, reject) => {
       const { spawn } = require('child_process');
@@ -698,6 +683,141 @@ class AudioDRM {
         ffmpeg.kill();
         reject(error);
       });
+    });
+  }
+
+  // NEW: Streaming chapter processing to avoid memory issues (KEEPING THIS)
+  async processChapterStream(masterFilePath, startTime, endTime, masterKey, outputPath) {
+    return new Promise((resolve, reject) => {
+      const { spawn } = require('child_process');
+      const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+      const fs = require('fs');
+      
+      // Create a temporary decrypted stream of the master file
+      const decryptedStream = this.createDecryptedStream(masterFilePath, { key: masterKey });
+      
+      // Calculate duration
+      const duration = endTime ? endTime - startTime : null;
+      
+      // FFmpeg arguments for extraction with output to file
+      const args = [
+        '-f', 'mp3',
+        '-i', 'pipe:0',  // Read from stdin
+        '-ss', startTime.toString(),
+        ...(duration ? ['-t', duration.toString()] : []),
+        '-c', 'copy',  // Copy without re-encoding when possible
+        '-f', 'mp3',
+        outputPath  // Output to file instead of memory
+      ];
+      
+      const ffmpeg = spawn(ffmpegPath, args, {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+      
+      let errorOutput = '';
+      
+      // Pipe decrypted master file to FFmpeg
+      decryptedStream.pipe(ffmpeg.stdin);
+      
+      ffmpeg.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+      });
+      
+      ffmpeg.on('close', (code) => {
+        if (code === 0) {
+          // Read file stats for size information
+          const stats = fs.statSync(outputPath);
+          resolve({
+            success: true,
+            filePath: outputPath,
+            size: stats.size
+          });
+        } else {
+          console.error('FFmpeg error:', errorOutput);
+          reject(new Error(`FFmpeg exited with code ${code}`));
+        }
+      });
+      
+      ffmpeg.on('error', (error) => {
+        console.error('FFmpeg spawn error:', error);
+        reject(error);
+      });
+      
+      decryptedStream.on('error', (error) => {
+        console.error('Decryption stream error:', error);
+        ffmpeg.kill();
+        reject(error);
+      });
+    });
+  }
+
+  // NEW: Streaming chapter encryption from file (KEEPING THIS)
+  async encryptChapterSegmentFromFile(inputFilePath) {
+    return new Promise((resolve, reject) => {
+      try {
+        const key = crypto.randomBytes(32);
+        const iv = crypto.randomBytes(IV_LENGTH);
+        const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+        
+        const inputStream = fs.createReadStream(inputFilePath, { highWaterMark: 64 * 1024 }); // 64KB chunks
+        const outputPath = inputFilePath + '.enc';
+        const outputStream = fs.createWriteStream(outputPath);
+        
+        let plainSize = 0;
+        let encryptedSize = 0;
+        
+        inputStream.on('data', (chunk) => {
+          plainSize += chunk.length;
+          const encryptedChunk = cipher.update(chunk);
+          outputStream.write(encryptedChunk);
+          encryptedSize += encryptedChunk.length;
+        });
+        
+        inputStream.on('end', () => {
+          try {
+            const finalChunk = cipher.final();
+            const authTag = cipher.getAuthTag();
+            
+            if (finalChunk.length > 0) {
+              outputStream.write(finalChunk);
+              encryptedSize += finalChunk.length;
+            }
+            
+            outputStream.end();
+            
+            outputStream.on('finish', () => {
+              // Clean up input file
+              fs.unlinkSync(inputFilePath);
+              
+              resolve({
+                key: key.toString('hex'),
+                iv: iv.toString('hex'),
+                authTag: authTag.toString('hex'),
+                encryptedPath: outputPath,
+                plainSize: plainSize,
+                encryptedSize: encryptedSize
+              });
+            });
+            
+          } catch (error) {
+            outputStream.destroy();
+            reject(error);
+          }
+        });
+        
+        inputStream.on('error', (error) => {
+          outputStream.destroy();
+          reject(error);
+        });
+        
+        outputStream.on('error', (error) => {
+          inputStream.destroy();
+          reject(error);
+        });
+        
+      } catch (error) {
+        reject(new Error('Failed to encrypt chapter segment from file'));
+      }
     });
   }
 }

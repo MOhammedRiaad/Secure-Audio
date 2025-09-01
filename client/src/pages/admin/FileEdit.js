@@ -79,7 +79,7 @@ const FileEdit = () => {
         if (file.coverImagePath || file.coverImageBase64) {
           const coverUrl = file.coverImageBase64 
             ? file.coverImageBase64 
-            : `/api/v1/cover/${file.id}`;
+            : await api.get(`/files/cover/${file.id}`);
           setCoverImagePreview(coverUrl);
           
           // Set storage type based on existing cover
@@ -163,7 +163,7 @@ const FileEdit = () => {
       if (updatedFile.coverImagePath || updatedFile.coverImageBase64) {
         const newCoverUrl = updatedFile.coverImageBase64 
           ? updatedFile.coverImageBase64 
-          : `/api/v1/cover/${updatedFile.id}?t=${Date.now()}`;
+          : await api.get(`/files/cover/${updatedFile.id}`);
         setCoverImagePreview(newCoverUrl);
       }
       
@@ -343,7 +343,11 @@ const FileEdit = () => {
                       <CardMedia
                         component="img"
                         height="200"
-                        image={coverImagePreview}
+                        image={
+                          originalData.coverImageBase64
+                            ? originalData.coverImageBase64
+                            : `/api/v1/files/cover/${ id}`
+                        }
                         alt="Cover preview"
                         sx={{ objectFit: 'cover' }}
                       />
