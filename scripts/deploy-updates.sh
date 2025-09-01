@@ -100,7 +100,7 @@ header "UPDATING BACKEND"
 log "Updating backend application files..."
 
 # Copy backend files (excluding node_modules and client)
-rsync -av --exclude='node_modules' --exclude='client' --exclude='.git' $TEMP_DIR/ $APP_DIR/
+rsync -av --exclude='node_modules' --exclude='client'  --exclude='uploads' --exclude='.git' $TEMP_DIR/ $APP_DIR/
 
 # Restore environment files
 if [ -f "$TEMP_DIR/.env.backup" ]; then
