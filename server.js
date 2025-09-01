@@ -30,6 +30,7 @@ const adminFilesRoutes = require("./routes/admin/files");
 const adminFileAccessRoutes = require("./routes/admin/fileAccess");
 const adminCleanupRoutes = require("./routes/admin/cleanup");
 const chunkedUploadRoutes = require("./routes/chunkedUpload");
+const audioChaptersRoutes = require("./routes/audioChapters");
 const chunkCleanupService = require("./services/chunkCleanupService");
 
 // Initialize Prisma Client
@@ -247,8 +248,22 @@ const startServer = async () => {
     console.log("Database connected successfully");
     
     // Start chunk cleanup service
-    chunkCleanupService.start();
+    chunkCleanupService.startScheduledCleanup();
     console.log("Chunk cleanup service started");
+
+    // Startup temp folder cleanup
+    console.log("🧹 Running startup temp folder cleanup...");
+    try {
+      const { cleanupTempFoldersUtil } = require("./controllers/audioChapters");
+      const cleanupResult = await cleanupTempFoldersUtil();
+      if (cleanupResult.filesCleaned > 0) {
+        console.log(`🧹 Startup cleanup: ${cleanupResult.filesCleaned} temp files (${(cleanupResult.sizeFreed / 1024 / 1024).toFixed(2)}MB) freed`);
+      } else {
+        console.log("🧹 Startup cleanup: No temp files found to clean");
+      }
+    } catch (cleanupError) {
+      console.warn("⚠️ Startup temp cleanup failed:", cleanupError.message);
+    }
 
     const server = app.listen(PORT, () => {
       console.log(

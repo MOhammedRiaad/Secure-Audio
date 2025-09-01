@@ -9,7 +9,8 @@ const {
   finalizeChapters,
   getChapterStatus,
   streamChapter,
-  generateChapterStreamUrl
+  generateChapterStreamUrl,
+  cleanupTempFolders
 } = require('../controllers/audioChapters');
 
 const router = express.Router({ mergeParams: true });
@@ -28,6 +29,9 @@ router.post('/sample', authorize('admin'), addSampleChapters);
 // Chapter finalization routes
 router.post('/finalize', authorize('admin'), finalizeChapters);
 router.get('/status', authorize('admin'), getChapterStatus);
+
+// Temp cleanup route
+router.post('/cleanup-temp', authorize('admin'), cleanupTempFolders);
 
 router.route('/:chapterId')
   .put(authorize('admin'), updateAudioChapter)
