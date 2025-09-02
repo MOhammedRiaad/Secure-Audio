@@ -66,6 +66,8 @@ const ChapterManager = ({ fileId, file, onPlayChapter }) => {
     loadChapterStatus();
   }, [fileId]);
 
+
+
   const loadChapters = async () => {
     try {
       setLoading(true);
@@ -175,9 +177,8 @@ const ChapterManager = ({ fileId, file, onPlayChapter }) => {
       setError('');
       
       const response = await api.post(`/files/${fileId}/chapters/sample`);
-      const { chapters } = response.data.data;
       
-      setChapters(chapters);
+      loadChapters();
       loadChapterStatus();
     } catch (err) {
       setError('Failed to load sample chapters');

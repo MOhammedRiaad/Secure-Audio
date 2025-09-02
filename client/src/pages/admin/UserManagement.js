@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../../api';
 import {
   Container,
   Typography,
@@ -56,7 +56,7 @@ const UserManagement = () => {
     const fetchUsers = async () => {
       try {
         setLoading(true);
-        const res = await axios.get('/api/v1/admin/users/with-sessions');
+        const res = await api.get('/admin/users/with-sessions');
         setUsers(res.data.data || []);
       } catch (err) {
         setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to load users');
@@ -102,7 +102,7 @@ const UserManagement = () => {
       setDeleteLoading(true);
       setDeleteError('');
       
-      await axios.delete(`/api/v1/admin/users/${userToDelete.id}`);
+      await api.delete(`/admin/users/${userToDelete.id}`);
       
       // Remove the deleted user from the list
       setUsers(users.filter((user) => user.id !== userToDelete.id));
@@ -140,7 +140,7 @@ const UserManagement = () => {
     try {
       setUnlockLoading(prev => ({ ...prev, [user.id]: true }));
       
-      await axios.patch(`/api/v1/admin/users/${user.id}/unlock`);
+      await api.patch(`/admin/users/${user.id}/unlock`);
       
       // Update the user in the list
       setUsers(users.map(u => 

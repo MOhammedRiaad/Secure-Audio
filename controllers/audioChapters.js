@@ -1039,7 +1039,7 @@ exports.generateChapterStreamUrl = asyncHandler(async (req, res, next) => {
   });
   
   // Construct secure streaming URL
-  const baseUrl = process.env.API_BASE_URL || 'http://localhost:5000/api/v1';
+  const baseUrl = req.headers.origin || 'http://localhost:5000/api/v1';
   const secureStreamUrl = `${baseUrl}/files/${fileId}/chapters/${chapterId}/stream?` +
     `expires=${expires}&` +
     `sig=${signature}&` +

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
-
+import apiURL from '../apiURL';
 const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
   
   const [isLoading, setIsLoading] = useState(false);
@@ -135,7 +135,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
   // Setup DRM audio streaming
   const setupAudioStreaming = async (sessionToken) => {
     try {
-      const streamUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000/api/v1'}/drm/stream/${sessionToken}`;
+      const streamUrl = `${apiURL}/drm/stream/${sessionToken}`;
       const correctedStreamUrl = streamUrl.replace('/api/v1/api/v1', '/api/v1');
       
       

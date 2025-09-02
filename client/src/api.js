@@ -1,6 +1,6 @@
 import axios from 'axios';
 import deviceFingerprint from './utils/deviceFingerprint';
-
+import apiURL from './apiURL';
 // Global logout handler - will be set by AuthContext
 let globalLogoutHandler = null;
 
@@ -11,7 +11,7 @@ export const setGlobalLogoutHandler = (handler) => {
 
 // Create axios instance with base URL
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api/v1',
+  baseURL: apiURL,
   headers: {
     'Content-Type': 'application/json',
   },
