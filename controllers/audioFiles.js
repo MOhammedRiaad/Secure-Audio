@@ -351,7 +351,7 @@ exports.generateStreamToken = asyncHandler(async (req, res, next) => {
 });
 
 // @desc    Stream audio file with token-based authentication
-// @route   GET /api/v1/files/stream/:token
+// @route   GET /api/v1/files/audio-stream/:token
 // @access  Private
 exports.streamAudioFile = asyncHandler(async (req, res, next) => {
   // Validate the token

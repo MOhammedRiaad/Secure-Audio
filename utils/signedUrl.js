@@ -96,8 +96,8 @@ const generateChapterStreamUrl = (fileId, chapterId, options = {}) => {
   });
   
   const baseUrl = process.env.API_BASE_URL || 'http://localhost:5000/api/v1';
-  let url = `${baseUrl}/files/${fileId}/chapters/${chapterId}/stream?start=${start}&end=${end}&expires=${expires}&sig=${signature}`;
-  
+  let url = `${baseUrl}/files/${fileId}/chapters/${chapterId}/stream-chapter?start=${start}&end=${end}&expires=${expires}&sig=${signature}`;
+  console.log('🔗 Generated chapter stream URL:', url);
   // Add token parameter if provided
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
