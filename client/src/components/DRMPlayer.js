@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
-
+import apiURL from '../apiURL';
 const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
   
   const [isLoading, setIsLoading] = useState(false);
@@ -135,7 +135,7 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
   // Setup DRM audio streaming
   const setupAudioStreaming = async (sessionToken) => {
     try {
-      const streamUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000/api/v1'}/drm/stream/${sessionToken}`;
+      const streamUrl = `${apiURL}/drm/stream/${sessionToken}`;
       const correctedStreamUrl = streamUrl.replace('/api/v1/api/v1', '/api/v1');
       
       
@@ -453,16 +453,26 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
       seekToWithSignedUrl(timeInSeconds);
     },
     playChapter: async (chapter) => {
+      console.log('🎵 DRMPlayer.playChapter called with:', {
+        chapterId: chapter.id,
+        chapterLabel: chapter.label,
+        fileId: fileId,
+        timestamp: new Date().toISOString()
+      });
       
       try {
+        console.log('📡 Making API call to generate chapter stream URL...');
         // Generate secure signed URL for chapter streaming
         const response = await api.post(`/files/${fileId}/chapters/${chapter.id}/stream-url`, {
           expiresIn: 30 * 60 * 1000 // 30 minutes
         });
         
+        console.log('✅ API response received:', response.data);
         const { streamUrl } = response.data.data;
+        console.log('🔗 Stream URL generated:', streamUrl);
         
         if (audioRef.current) {
+          console.log('🎧 Setting up audio player for chapter...');
           // Stop current playback
           audioRef.current.pause();
           audioRef.current.currentTime = 0;
@@ -473,14 +483,22 @@ const DRMPlayer = forwardRef(({ fileId, onError }, ref) => {
           audioRef.current.load();
           
           // Play the chapter
+          console.log('▶️ Attempting to play chapter...');
           audioRef.current.play().catch(err => {
-            console.error('Chapter play error:', err);
+            console.error('❌ Chapter play error:', err);
             if (onError) onError(`Failed to play chapter: ${err.message}`);
           });
           
+        } else {
+          console.error('❌ Audio ref is null');
         }
       } catch (err) {
-        console.error('Chapter streaming error:', err);
+        console.error('❌ Chapter streaming error:', err);
+        console.error('Error details:', {
+          message: err.message,
+          status: err.response?.status,
+          data: err.response?.data
+        });
         if (onError) onError(`Failed to stream chapter: ${err.response?.data?.message || err.message}`);
       }
     },

@@ -38,7 +38,7 @@ router.route('/:chapterId')
   .delete(authorize('admin'), deleteAudioChapter);
 
 // Chapter streaming routes with OPTIONS handling
-router.options('/:chapterId/stream', (req, res) => {
+router.options('/:chapterId/stream-chapter', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
@@ -47,7 +47,8 @@ router.options('/:chapterId/stream', (req, res) => {
   res.status(200).end();
 });
 
-router.get('/:chapterId/stream', streamChapter);
+// Chapter streaming - this is more specific so it won't conflict
+router.get('/:chapterId/stream-chapter', streamChapter);
 router.post('/:chapterId/stream-url', generateChapterStreamUrl);
 
 module.exports = router;

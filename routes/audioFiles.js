@@ -76,9 +76,9 @@ router.route('/:id')
   .get(protect, getAudioFile)
   .delete(protect, authorize('admin'), deleteAudioFile);
 
-// Stream token and streaming routes
+// Stream token and streaming routes - moved before chapter mounting to avoid conflicts
 router.get('/stream-token/:id', protect, generateStreamToken);
-router.get('/stream/:token', streamingLimiter, streamAudioFile);
+router.get('/audio-stream/:token', streamingLimiter, streamAudioFile);
 
 // Mount chapter routes
 router.use('/:fileId/chapters', audioChapterRoutes);

@@ -292,6 +292,12 @@ exports.addSampleChapters = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/files/:fileId/chapters/finalize
 // @access  Private/Admin
 exports.finalizeChapters = asyncHandler(async (req, res, next) => {
+  console.log('🚀 FINALIZE CHAPTERS ENDPOINT CALLED!', {
+    fileId: req.params.fileId,
+    body: req.body,
+    timestamp: new Date().toISOString()
+  });
+  
   const fileId = parseInt(req.params.fileId);
   const { storageType } = req.body; // Optional override
 
@@ -719,13 +725,13 @@ exports.getChapterStatus = asyncHandler(async (req, res, next) => {
 });
 
 // @desc    Stream individual chapter with secure token validation
-// @route   GET /api/v1/files/:fileId/chapters/:chapterId/stream
+// @route   GET /api/v1/files/:fileId/chapters/:chapterId/stream-chapter
 // @access  Private (with token and signature verification)
 exports.streamChapter = asyncHandler(async (req, res, next) => {
   const fileId = parseInt(req.params.fileId);
   const chapterId = parseInt(req.params.chapterId);
   const { expires, sig, token, start = "0", end = "-1" } = req.query;
-  
+  debugger;
   // **SECURITY VALIDATION**
   // 1. Validate required security parameters
   if (!expires || !sig || !token) {
@@ -1040,7 +1046,7 @@ exports.generateChapterStreamUrl = asyncHandler(async (req, res, next) => {
   
   // Construct secure streaming URL
   const baseUrl = process.env.API_BASE_URL || 'http://localhost:5000/api/v1';
-  const secureStreamUrl = `${baseUrl}/files/${fileId}/chapters/${chapterId}/stream?` +
+  const secureStreamUrl = `${baseUrl}/files/${fileId}/chapters/${chapterId}/stream-chapter?` +
     `expires=${expires}&` +
     `sig=${signature}&` +
     `token=${encodeURIComponent(jwtToken)}&` +

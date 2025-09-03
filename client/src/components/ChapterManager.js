@@ -66,6 +66,8 @@ const ChapterManager = ({ fileId, file, onPlayChapter }) => {
     loadChapterStatus();
   }, [fileId]);
 
+
+
   const loadChapters = async () => {
     try {
       setLoading(true);
@@ -175,9 +177,8 @@ const ChapterManager = ({ fileId, file, onPlayChapter }) => {
       setError('');
       
       const response = await api.post(`/files/${fileId}/chapters/sample`);
-      const { chapters } = response.data.data;
       
-      setChapters(chapters);
+      loadChapters();
       loadChapterStatus();
     } catch (err) {
       setError('Failed to load sample chapters');
@@ -185,26 +186,38 @@ const ChapterManager = ({ fileId, file, onPlayChapter }) => {
   };
 
   const handlePlayChapter = async (chapter) => {
+    console.log('📎 ChapterManager.handlePlayChapter called with:', {
+      chapterId: chapter.id,
+      chapterLabel: chapter.label,
+      chapterStatus: chapter.status,
+      hasOnPlayChapter: !!onPlayChapter,
+      timestamp: new Date().toISOString()
+    });
+    
     try {
       setError('');
       
       if (chapter.status !== 'ready') {
+        console.warn('⚠️ Chapter not ready:', chapter.status);
         setError('Chapter is not ready for playback. Please finalize chapters first.');
         return;
       }
 
       // If onPlayChapter callback is provided, use it (for integration with main player)
       if (onPlayChapter) {
+        console.log('✅ Using onPlayChapter callback...');
         onPlayChapter(chapter);
         setSuccess(`Playing chapter: ${chapter.label}`);
         return;
       }
 
+      console.log('📡 Fallback: Generating secure signed URL for chapter streaming...');
       // Fallback: Generate secure signed URL for chapter streaming
       const response = await api.post(`/files/${fileId}/chapters/${chapter.id}/stream-url`, {
         expiresIn: 30 * 60 * 1000 // 30 minutes
       });
       
+      console.log('✅ Stream URL response:', response.data);
       const { streamUrl } = response.data.data;
       
       // Create a temporary audio element to play the chapter
@@ -214,22 +227,29 @@ const ChapterManager = ({ fileId, file, onPlayChapter }) => {
       
       // Add security headers and play
       audio.addEventListener('loadstart', () => {
+        console.log('🎵 Chapter audio loading started...');
       });
       
       audio.addEventListener('error', (e) => {
-        console.error('Chapter playback error:', e);
+        console.error('❌ Chapter playback error:', e);
         setError(`Failed to play chapter: ${chapter.label}`);
       });
       
+      console.log('▶️ Attempting to play chapter audio...');
       audio.play().catch(err => {
-        console.error('Chapter play error:', err);
+        console.error('❌ Chapter play error:', err);
         setError(`Failed to start chapter playback: ${err.message}`);
       });
       
       setSuccess(`Playing chapter: ${chapter.label}`);
       
     } catch (err) {
-      console.error('Chapter streaming error:', err);
+      console.error('❌ Chapter streaming error:', err);
+      console.error('Error details:', {
+        message: err.message,
+        status: err.response?.status,
+        data: err.response?.data
+      });
       setError(`Failed to stream chapter: ${err.response?.data?.message || err.message}`);
     }
   };

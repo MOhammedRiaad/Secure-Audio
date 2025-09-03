@@ -455,7 +455,7 @@ exports.streamSignedAudio = asyncHandler(async (req, res, next) => {
 });
 
 // @desc    Generate signed URL for timestamp-based streaming
-// @route   POST /api/v1/drm/signed-url/:id
+// @route   POST /api/v1/drm/signed-url
 // @access  Private
 exports.generateSignedStreamUrl = asyncHandler(async (req, res, next) => {
   const fileId = parseInt(req.params.id);

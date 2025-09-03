@@ -398,7 +398,7 @@ class AudioDRM {
     });
   }
 
-  // Create decrypted stream for encrypted files (GCM format) - OLD WORKING VERSION
+  // Create decrypted stream for encrypted files (GCM format) - ENHANCED WITH DEBUG
   createDecryptedStream(encryptedFilePath, options) {
     try {
       const { key } = options;
@@ -412,6 +412,8 @@ class AudioDRM {
       const fileSize = stats.size;
       
       console.log(`🔐 Creating decrypted stream for file: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+      console.log(`🔐 File path: ${encryptedFilePath}`);
+      console.log(`🔐 Key provided: ${key ? 'YES' : 'NO'}`);
       
       // Validate file size meets minimum DRM format requirements
       if (fileSize < IV_LENGTH + TAG_LENGTH) {
@@ -426,6 +428,18 @@ class AudioDRM {
       
       console.log(`🔐 Auth tag read: ${authTagBuffer.toString('hex')} (${authTagBuffer.length} bytes)`);
       
+      // Read first few bytes to check file format
+      const headerBuffer = Buffer.alloc(32);
+      const headerFd = fs.openSync(encryptedFilePath, 'r');
+      const headerBytesRead = fs.readSync(headerFd, headerBuffer, 0, 32, 0);
+      fs.closeSync(headerFd);
+      
+      console.log(`🔐 File header (first ${headerBytesRead} bytes): ${headerBuffer.slice(0, headerBytesRead).toString('hex')}`);
+      
+      // Check if this looks like our expected format
+      const potentialIV = headerBuffer.slice(0, IV_LENGTH);
+      console.log(`🔐 Potential IV: ${potentialIV.toString('hex')}`);
+      
       // Create a transform stream for decryption
       const { Transform } = require('stream');
       
@@ -436,10 +450,14 @@ class AudioDRM {
           try {
             // For the first chunk, extract the IV
             if (!this.headerExtracted) {
+              console.log(`🔐 Processing first chunk: ${chunk.length} bytes`);
+              console.log(`🔐 First chunk hex: ${chunk.slice(0, Math.min(32, chunk.length)).toString('hex')}`);
+              
               if (chunk.length < IV_LENGTH) {
                 // Buffer incomplete header
                 this.headerBuffer = this.headerBuffer ? Buffer.concat([this.headerBuffer, chunk]) : chunk;
                 if (this.headerBuffer.length < IV_LENGTH) {
+                  console.log(`🔐 Waiting for more header data: ${this.headerBuffer.length}/${IV_LENGTH}`);
                   return callback(); // Wait for more data
                 }
                 chunk = this.headerBuffer;
@@ -452,12 +470,21 @@ class AudioDRM {
               this.totalProcessed = IV_LENGTH;
               
               console.log(`🔐 IV extracted: ${this.fileIV.toString('hex')} (${this.fileIV.length} bytes)`);
+              console.log(`🔐 Remaining chunk after IV: ${chunk.length} bytes`);
               
               // Initialize decipher with the IV from the file
-              this.decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), this.fileIV);
-              this.decipher.setAuthTag(authTagBuffer);
+              try {
+                this.decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), this.fileIV);
+                this.decipher.setAuthTag(authTagBuffer);
+                console.log(`🔐 Decipher initialized successfully`);
+              } catch (decipherError) {
+                console.error(`🚨 Failed to initialize decipher: ${decipherError.message}`);
+                return callback(decipherError);
+              }
               
               console.log(`🔐 Header extracted, remaining chunk size: ${chunk.length} bytes`);
+            } else {
+              console.log(`🔐 Processing subsequent chunk: ${chunk.length} bytes`);
             }
             
             // Track how much we've processed to avoid decrypting the auth tag
@@ -466,14 +493,29 @@ class AudioDRM {
             // Don't decrypt the last TAG_LENGTH bytes (auth tag)
             if (this.totalProcessed > fileSize - TAG_LENGTH) {
               const overrun = this.totalProcessed - (fileSize - TAG_LENGTH);
+              const originalChunkLength = chunk.length;
               chunk = chunk.slice(0, chunk.length - overrun);
+              console.log(`🔐 Trimmed chunk to avoid auth tag: ${originalChunkLength} -> ${chunk.length} bytes`);
             }
             
             // Decrypt the chunk
             if (chunk.length > 0) {
-              const decrypted = this.decipher.update(chunk);
-              callback(null, decrypted);
+              try {
+                const decrypted = this.decipher.update(chunk);
+                console.log(`🔐 Decrypted chunk: ${chunk.length} -> ${decrypted.length} bytes`);
+                
+                // Log first few bytes of decrypted data for analysis
+                if (decrypted.length > 0 && this.totalProcessed <= IV_LENGTH + 64) {
+                  console.log(`🔐 Decrypted data sample: ${decrypted.slice(0, Math.min(32, decrypted.length)).toString('hex')}`);
+                }
+                
+                callback(null, decrypted);
+              } catch (decryptError) {
+                console.error(`🚨 Chunk decryption error: ${decryptError.message}`);
+                callback(decryptError);
+              }
             } else {
+              console.log(`🔐 Skipping empty chunk`);
               callback();
             }
             
@@ -686,68 +728,237 @@ class AudioDRM {
     });
   }
 
-  // NEW: Streaming chapter processing to avoid memory issues (KEEPING THIS)
+  // NEW: File-based chapter processing to avoid piping issues (ENHANCED)
   async processChapterStream(masterFilePath, startTime, endTime, masterKey, outputPath) {
-    return new Promise((resolve, reject) => {
+    console.log('🚀 NEW FILE-BASED CHAPTER PROCESSING CALLED!', {
+      masterFilePath,
+      startTime,
+      endTime,
+      outputPath,
+      timestamp: new Date().toISOString()
+    });
+    
+    return new Promise(async (resolve, reject) => {
       const { spawn } = require('child_process');
-      const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+      let ffmpegPath;
       const fs = require('fs');
       
-      // Create a temporary decrypted stream of the master file
-      const decryptedStream = this.createDecryptedStream(masterFilePath, { key: masterKey });
+      // Use system FFmpeg as fallback if package version fails
+      try {
+        ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+        console.log('🔧 Using package FFmpeg:', ffmpegPath);
+      } catch (error) {
+        ffmpegPath = 'ffmpeg';
+        console.log('🔧 Package FFmpeg not found, using system FFmpeg');
+      }
       
-      // Calculate duration
-      const duration = endTime ? endTime - startTime : null;
+      console.log(`🔧 Processing chapter: ${startTime}s to ${endTime || 'end'}s`);
       
-      // FFmpeg arguments for extraction with output to file
-      const args = [
-        '-f', 'mp3',
-        '-i', 'pipe:0',  // Read from stdin
-        '-ss', startTime.toString(),
-        ...(duration ? ['-t', duration.toString()] : []),
-        '-c', 'copy',  // Copy without re-encoding when possible
-        '-f', 'mp3',
-        outputPath  // Output to file instead of memory
-      ];
+      // STEP 1: Create temporary decrypted file first
+      const tempDecryptedPath = path.join(
+        process.env.FILE_UPLOAD_PATH, 
+        'temp', 
+        `temp_decrypted_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp3`
+      );
       
-      const ffmpeg = spawn(ffmpegPath, args, {
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
+      // Ensure temp directory exists
+      const tempDir = path.dirname(tempDecryptedPath);
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
       
-      let errorOutput = '';
+      console.log(`🔐 Step 1: Creating temporary decrypted file...`);
       
-      // Pipe decrypted master file to FFmpeg
-      decryptedStream.pipe(ffmpeg.stdin);
-      
-      ffmpeg.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-      });
-      
-      ffmpeg.on('close', (code) => {
-        if (code === 0) {
-          // Read file stats for size information
+      try {
+        // Create full decrypted file first (this is proven to work)
+        await this.createTemporaryDecryptedFile(masterFilePath, masterKey, tempDecryptedPath);
+        
+        console.log(`✅ Temporary decrypted file created: ${tempDecryptedPath}`);
+        
+        // STEP 2: Use FFmpeg with direct file access (proven to work)
+        console.log(`🔧 Step 2: Extracting chapter segment with FFmpeg...`);
+        
+        const duration = endTime ? endTime - startTime : null;
+        
+        // Enhanced FFmpeg arguments for file-based processing
+        const args = [
+          '-y',              // Overwrite output file
+          '-loglevel', 'error',  // Less verbose logging
+          '-i', tempDecryptedPath,  // Input from temporary file
+          '-ss', startTime.toString(),
+          ...(duration ? ['-t', duration.toString()] : []),
+          '-avoid_negative_ts', 'make_zero',
+          '-c:a', 'copy',    // Copy audio codec (no re-encoding)
+          '-f', 'mp3',       // Force output format
+          outputPath         // Output to final location
+        ];
+        
+        console.log(`🔧 FFmpeg command: ${ffmpegPath} ${args.join(' ')}`);
+        
+        const ffmpeg = spawn(ffmpegPath, args, {
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+        
+        let errorOutput = '';
+        
+        ffmpeg.stderr.on('data', (data) => {
+          const errorText = data.toString();
+          errorOutput += errorText;
+          if (errorText.includes('Error') || errorText.includes('Invalid')) {
+            console.log('🔧 FFmpeg stderr:', errorText.trim());
+          }
+        });
+        
+        ffmpeg.on('close', (code) => {
+          // Clean up temporary file immediately
+          try {
+            if (fs.existsSync(tempDecryptedPath)) {
+              fs.unlinkSync(tempDecryptedPath);
+              console.log('🧹 Cleaned up temporary decrypted file');
+            }
+          } catch (cleanupError) {
+            console.warn(`⚠️ Cleanup warning: ${cleanupError.message}`);
+          }
+          
+          if (code === 0) {
+            // Verify output file was created and has content
+            if (fs.existsSync(outputPath)) {
+              const stats = fs.statSync(outputPath);
+              if (stats.size > 0) {
+                console.log(`✅ Chapter extracted successfully: ${stats.size} bytes`);
+                resolve({
+                  success: true,
+                  filePath: outputPath,
+                  size: stats.size
+                });
+              } else {
+                console.error('❌ Output file is empty');
+                reject(new Error('FFmpeg produced empty output file'));
+              }
+            } else {
+              console.error('❌ Output file not created');
+              reject(new Error('FFmpeg did not create output file'));
+            }
+          } else {
+            console.error(`❌ FFmpeg error (exit code ${code}):`, errorOutput);
+            reject(new Error(`FFmpeg exited with code ${code}: ${errorOutput}`));
+          }
+        });
+        
+        ffmpeg.on('error', (error) => {
+          // Clean up on error
+          try {
+            if (fs.existsSync(tempDecryptedPath)) {
+              fs.unlinkSync(tempDecryptedPath);
+            }
+          } catch (cleanupError) {}
+          
+          console.error('❌ FFmpeg spawn error:', error);
+          reject(new Error(`Failed to spawn FFmpeg: ${error.message}`));
+        });
+        
+        // Add timeout for FFmpeg process
+        const timeout = setTimeout(() => {
+          console.error('❌ FFmpeg process timeout');
+          ffmpeg.kill('SIGKILL');
+          
+          // Clean up on timeout
+          try {
+            if (fs.existsSync(tempDecryptedPath)) {
+              fs.unlinkSync(tempDecryptedPath);
+            }
+          } catch (cleanupError) {}
+          
+          reject(new Error('FFmpeg process timed out after 120 seconds'));
+        }, 120000); // 2 minute timeout
+        
+        ffmpeg.on('close', () => {
+          clearTimeout(timeout);
+        });
+        
+      } catch (decryptionError) {
+        // Clean up on decryption error
+        try {
+          if (fs.existsSync(tempDecryptedPath)) {
+            fs.unlinkSync(tempDecryptedPath);
+          }
+        } catch (cleanupError) {}
+        
+        console.error('❌ Temporary file creation error:', decryptionError);
+        reject(new Error(`Failed to create temporary decrypted file: ${decryptionError.message}`));
+      }
+    });
+  }
+
+  // Helper method to create temporary decrypted file
+  async createTemporaryDecryptedFile(encryptedFilePath, encryptionKey, outputPath) {
+    return new Promise((resolve, reject) => {
+      try {
+        console.log(`🔐 Creating temporary decrypted file from: ${encryptedFilePath}`);
+        
+        const decryptedStream = this.createDecryptedStream(encryptedFilePath, { 
+          key: encryptionKey 
+        });
+        
+        const writeStream = fs.createWriteStream(outputPath);
+        
+        let totalBytes = 0;
+        let chunkCount = 0;
+        
+        decryptedStream.on('data', (chunk) => {
+          chunkCount++;
+          totalBytes += chunk.length;
+          writeStream.write(chunk);
+          
+          // Log progress for large files
+          if (chunkCount % 1000 === 0) {
+            console.log(`🔐 Progress: ${chunkCount} chunks, ${(totalBytes / 1024 / 1024).toFixed(1)}MB`);
+          }
+        });
+        
+        decryptedStream.on('end', () => {
+          writeStream.end();
+          console.log(`✅ Decryption completed: ${chunkCount} chunks, ${(totalBytes / 1024 / 1024).toFixed(2)}MB`);
+        });
+        
+        writeStream.on('finish', () => {
           const stats = fs.statSync(outputPath);
-          resolve({
-            success: true,
-            filePath: outputPath,
-            size: stats.size
-          });
-        } else {
-          console.error('FFmpeg error:', errorOutput);
-          reject(new Error(`FFmpeg exited with code ${code}`));
-        }
-      });
-      
-      ffmpeg.on('error', (error) => {
-        console.error('FFmpeg spawn error:', error);
+          console.log(`📁 Temporary file written: ${(stats.size / 1024 / 1024).toFixed(2)}MB`);
+          resolve();
+        });
+        
+        decryptedStream.on('error', (error) => {
+          console.error(`❌ Decryption stream error: ${error.message}`);
+          writeStream.destroy();
+          
+          // Clean up on error
+          try {
+            if (fs.existsSync(outputPath)) {
+              fs.unlinkSync(outputPath);
+            }
+          } catch (cleanupError) {}
+          
+          reject(error);
+        });
+        
+        writeStream.on('error', (error) => {
+          console.error(`❌ Write stream error: ${error.message}`);
+          decryptedStream.destroy();
+          
+          // Clean up on error
+          try {
+            if (fs.existsSync(outputPath)) {
+              fs.unlinkSync(outputPath);
+            }
+          } catch (cleanupError) {}
+          
+          reject(error);
+        });
+        
+      } catch (error) {
+        console.error(`❌ Temporary file creation setup error: ${error.message}`);
         reject(error);
-      });
-      
-      decryptedStream.on('error', (error) => {
-        console.error('Decryption stream error:', error);
-        ffmpeg.kill();
-        reject(error);
-      });
+      }
     });
   }
 

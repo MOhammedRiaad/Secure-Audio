@@ -107,7 +107,15 @@ const AudioPlayer = () => {
 
   // Handle chapter playback through DRMPlayer
   const handlePlayChapter = (chapter) => {
+    console.log('🎧 AudioPlayer.handlePlayChapter called with:', {
+      chapterId: chapter.id,
+      chapterLabel: chapter.label,
+      chapterStatus: chapter.status,
+      timestamp: new Date().toISOString()
+    });
+    
     if (drmPlayerRef.current) {
+      console.log('✅ DRM player ref exists, calling playChapter...');
       drmPlayerRef.current.playChapter(chapter);
     } else {
       console.error('❌ DRM player ref is null');
