@@ -741,6 +741,7 @@ exports.streamChapter = asyncHandler(async (req, res, next) => {
     });
   }
   
+  console.log('🔐 chapter streaming token:', token);
   // 2. Verify JWT token for user authentication
   let userId;
   try {
@@ -845,74 +846,15 @@ exports.streamChapter = asyncHandler(async (req, res, next) => {
     // Get encrypted chapter data from database or filesystem
     if (chapter.encryptedData) {
       // Data stored in database (BYTEA)
+      console.log('🔐 Data stored in database');
       encryptedData = chapter.encryptedData;
     } else if (chapter.encryptedPath) {
+      console.log('🔐 Data stored in filesystem');
       // Data stored in filesystem - use streaming for large files
       const chapterFilePath = path.join(process.env.FILE_UPLOAD_PATH, chapter.encryptedPath);
       
       if (!fs.existsSync(chapterFilePath)) {
         return next(new ErrorResponse('Chapter file not found on disk', 404));
-      }
-      
-      // For large files, stream directly instead of loading into memory
-      const stats = fs.statSync(chapterFilePath);
-      if (stats.size > 50 * 1024 * 1024) { // 50MB threshold
-        
-        // Stream large encrypted file and decrypt on-the-fly with security headers
-        const { Transform } = require('stream');
-        const crypto = require('crypto');
-        
-        const decipher = crypto.createDecipheriv('aes-256-gcm', 
-          Buffer.from(chapter.encryptionKey, 'hex'), 
-          Buffer.from(chapter.encryptionIV, 'hex')
-        );
-        decipher.setAuthTag(Buffer.from(chapter.encryptionTag, 'hex'));
-        
-        // Set enhanced security headers
-        res.setHeader('Content-Type', file.mimeType || 'audio/mpeg');
-        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        res.setHeader('X-Frame-Options', 'DENY');
-        res.setHeader('Content-Security-Policy', "default-src 'none'");
-        res.setHeader('X-Download-Options', 'noopen');
-        res.setHeader('Content-Disposition', `inline; filename="${chapter.label}.mp3"`);
-        res.setHeader('X-Chapter-Id', chapter.id.toString());
-        res.setHeader('X-Chapter-Label', chapter.label);
-        res.setHeader('X-Secure-Stream', 'true');
-        res.setHeader('X-Token-Validated', 'true');
-        res.setHeader('Accept-Ranges', 'none');
-        
-        res.status(200);
-        
-        // Set CORS headers for mobile client access (large file streaming)
-        res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization, X-Device-Fingerprint');
-        res.setHeader('Access-Control-Expose-Headers', 'X-Chapter-Id, X-Chapter-Label, X-Secure-Stream, X-Token-Validated, Content-Range, Accept-Ranges');
-        
-        // Stream the file through the decipher
-        const fileStream = fs.createReadStream(chapterFilePath);
-        fileStream.pipe(decipher).pipe(res);
-        
-        fileStream.on('error', (error) => {
-          console.error('Secure chapter stream file error:', error);
-          if (!res.headersSent) {
-            res.status(500).json({ success: false, error: 'Stream error' });
-          }
-        });
-        
-        decipher.on('error', (error) => {
-          console.error('Secure chapter stream decryption error:', error);
-          if (!res.headersSent) {
-            res.status(500).json({ success: false, error: 'Decryption error' });
-          }
-        });
-        
-        return;
       }
       
       // For smaller files, load into memory (original approach)
@@ -981,7 +923,7 @@ exports.generateChapterStreamUrl = asyncHandler(async (req, res, next) => {
   const chapterId = parseInt(req.params.chapterId);
   const userId = req.user.id;
   const { expiresIn = 30 * 60 * 1000 } = req.body; // 30 minutes default
-  
+  const jwtToken = req.headers.authorization.split(' ')[1];
   // Verify chapter exists and user has access
   const chapter = await prisma.audioChapter.findFirst({
     where: {
@@ -1024,33 +966,12 @@ exports.generateChapterStreamUrl = asyncHandler(async (req, res, next) => {
     }
   }
   
-  // Generate JWT token for this request
-  const jwtToken = jwt.sign(
-    { id: userId, fileId, chapterId },
-    process.env.JWT_SECRET,
-    { expiresIn: Math.floor(expiresIn / 1000) + 's' }
-  );
-  
-  // Generate signature for chapter streaming
-  const expires = Date.now() + expiresIn;
-  const chapterRef = `${fileId}:${chapterId}`;
-  const { generateSignature } = require('../utils/signedUrl');
-  
-  const signature = generateSignature({
-    fileRef: chapterRef,
-    start: '0',
-    end: '-1',
-    expires,
-    ip: req.ip
+  const { generateChapterStreamUrl } = require('../utils/signedUrl');
+  const secureStreamUrl = generateChapterStreamUrl(fileId, chapterId, {
+    expiresIn,
+    ip: req.ip,
+    token: jwtToken
   });
-  
-  // Construct secure streaming URL
-  const baseUrl = process.env.API_BASE_URL || 'http://localhost:5000/api/v1';
-  const secureStreamUrl = `${baseUrl}/files/${fileId}/chapters/${chapterId}/stream-chapter?` +
-    `expires=${expires}&` +
-    `sig=${signature}&` +
-    `token=${encodeURIComponent(jwtToken)}&` +
-    `start=0&end=-1`;
   
   
   res.status(200).json({
@@ -1061,7 +982,7 @@ exports.generateChapterStreamUrl = asyncHandler(async (req, res, next) => {
       chapterLabel: chapter.label,
       fileId: file.id,
       fileName: file.filename,
-      expiresAt: new Date(expires).toISOString(),
+      expiresAt: new Date(Date.now() + expiresIn).toISOString(),
       expiresIn,
       isSecure: true
     }

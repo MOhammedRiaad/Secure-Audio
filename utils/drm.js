@@ -426,7 +426,7 @@ class AudioDRM {
       fs.readSync(fd, authTagBuffer, 0, TAG_LENGTH, fileSize - TAG_LENGTH);
       fs.closeSync(fd);
       
-      console.log(`🔐 Auth tag read: ${authTagBuffer.toString('hex')} (${authTagBuffer.length} bytes)`);
+    
       
       // Read first few bytes to check file format
       const headerBuffer = Buffer.alloc(32);
@@ -434,11 +434,9 @@ class AudioDRM {
       const headerBytesRead = fs.readSync(headerFd, headerBuffer, 0, 32, 0);
       fs.closeSync(headerFd);
       
-      console.log(`🔐 File header (first ${headerBytesRead} bytes): ${headerBuffer.slice(0, headerBytesRead).toString('hex')}`);
       
       // Check if this looks like our expected format
       const potentialIV = headerBuffer.slice(0, IV_LENGTH);
-      console.log(`🔐 Potential IV: ${potentialIV.toString('hex')}`);
       
       // Create a transform stream for decryption
       const { Transform } = require('stream');
@@ -450,14 +448,11 @@ class AudioDRM {
           try {
             // For the first chunk, extract the IV
             if (!this.headerExtracted) {
-              console.log(`🔐 Processing first chunk: ${chunk.length} bytes`);
-              console.log(`🔐 First chunk hex: ${chunk.slice(0, Math.min(32, chunk.length)).toString('hex')}`);
-              
+           
               if (chunk.length < IV_LENGTH) {
                 // Buffer incomplete header
                 this.headerBuffer = this.headerBuffer ? Buffer.concat([this.headerBuffer, chunk]) : chunk;
                 if (this.headerBuffer.length < IV_LENGTH) {
-                  console.log(`🔐 Waiting for more header data: ${this.headerBuffer.length}/${IV_LENGTH}`);
                   return callback(); // Wait for more data
                 }
                 chunk = this.headerBuffer;
@@ -468,24 +463,17 @@ class AudioDRM {
               chunk = chunk.slice(IV_LENGTH);
               this.headerExtracted = true;
               this.totalProcessed = IV_LENGTH;
-              
-              console.log(`🔐 IV extracted: ${this.fileIV.toString('hex')} (${this.fileIV.length} bytes)`);
-              console.log(`🔐 Remaining chunk after IV: ${chunk.length} bytes`);
-              
+          
               // Initialize decipher with the IV from the file
               try {
                 this.decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(key, 'hex'), this.fileIV);
                 this.decipher.setAuthTag(authTagBuffer);
-                console.log(`🔐 Decipher initialized successfully`);
               } catch (decipherError) {
                 console.error(`🚨 Failed to initialize decipher: ${decipherError.message}`);
                 return callback(decipherError);
               }
               
-              console.log(`🔐 Header extracted, remaining chunk size: ${chunk.length} bytes`);
-            } else {
-              console.log(`🔐 Processing subsequent chunk: ${chunk.length} bytes`);
-            }
+            } 
             
             // Track how much we've processed to avoid decrypting the auth tag
             this.totalProcessed = (this.totalProcessed || 0) + chunk.length;
@@ -495,27 +483,23 @@ class AudioDRM {
               const overrun = this.totalProcessed - (fileSize - TAG_LENGTH);
               const originalChunkLength = chunk.length;
               chunk = chunk.slice(0, chunk.length - overrun);
-              console.log(`🔐 Trimmed chunk to avoid auth tag: ${originalChunkLength} -> ${chunk.length} bytes`);
             }
             
             // Decrypt the chunk
             if (chunk.length > 0) {
               try {
                 const decrypted = this.decipher.update(chunk);
-                console.log(`🔐 Decrypted chunk: ${chunk.length} -> ${decrypted.length} bytes`);
+                
                 
                 // Log first few bytes of decrypted data for analysis
                 if (decrypted.length > 0 && this.totalProcessed <= IV_LENGTH + 64) {
-                  console.log(`🔐 Decrypted data sample: ${decrypted.slice(0, Math.min(32, decrypted.length)).toString('hex')}`);
                 }
                 
                 callback(null, decrypted);
               } catch (decryptError) {
-                console.error(`🚨 Chunk decryption error: ${decryptError.message}`);
                 callback(decryptError);
               }
             } else {
-              console.log(`🔐 Skipping empty chunk`);
               callback();
             }
             
@@ -529,7 +513,6 @@ class AudioDRM {
           try {
             if (this.decipher) {
               const final = this.decipher.final();
-              console.log(`🔐 Decryption completed, final chunk size: ${final.length} bytes`);
               callback(null, final);
             } else {
               callback();
@@ -752,7 +735,7 @@ class AudioDRM {
         console.log('🔧 Package FFmpeg not found, using system FFmpeg');
       }
       
-      console.log(`🔧 Processing chapter: ${startTime}s to ${endTime || 'end'}s`);
+      
       
       // STEP 1: Create temporary decrypted file first
       const tempDecryptedPath = path.join(
@@ -767,16 +750,15 @@ class AudioDRM {
         fs.mkdirSync(tempDir, { recursive: true });
       }
       
-      console.log(`🔐 Step 1: Creating temporary decrypted file...`);
+      
       
       try {
         // Create full decrypted file first (this is proven to work)
         await this.createTemporaryDecryptedFile(masterFilePath, masterKey, tempDecryptedPath);
         
-        console.log(`✅ Temporary decrypted file created: ${tempDecryptedPath}`);
         
-        // STEP 2: Use FFmpeg with direct file access (proven to work)
-        console.log(`🔧 Step 2: Extracting chapter segment with FFmpeg...`);
+        
+       
         
         const duration = endTime ? endTime - startTime : null;
         
@@ -793,7 +775,7 @@ class AudioDRM {
           outputPath         // Output to final location
         ];
         
-        console.log(`🔧 FFmpeg command: ${ffmpegPath} ${args.join(' ')}`);
+    
         
         const ffmpeg = spawn(ffmpegPath, args, {
           stdio: ['pipe', 'pipe', 'pipe']
@@ -814,7 +796,7 @@ class AudioDRM {
           try {
             if (fs.existsSync(tempDecryptedPath)) {
               fs.unlinkSync(tempDecryptedPath);
-              console.log('🧹 Cleaned up temporary decrypted file');
+           
             }
           } catch (cleanupError) {
             console.warn(`⚠️ Cleanup warning: ${cleanupError.message}`);
@@ -825,14 +807,14 @@ class AudioDRM {
             if (fs.existsSync(outputPath)) {
               const stats = fs.statSync(outputPath);
               if (stats.size > 0) {
-                console.log(`✅ Chapter extracted successfully: ${stats.size} bytes`);
+               
                 resolve({
                   success: true,
                   filePath: outputPath,
                   size: stats.size
                 });
               } else {
-                console.error('❌ Output file is empty');
+               
                 reject(new Error('FFmpeg produced empty output file'));
               }
             } else {
